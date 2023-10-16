@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import cytoscape, { Core, NodeSingular } from "cytoscape";
+import cytoscape, { Core, EdgeSingular, NodeSingular } from "cytoscape";
 
 export type GraphMode = 'edit' | 'path_select' | 'display'
 
@@ -13,20 +13,24 @@ type GraphProps = {
 // select a, e, select b -> edge between a and b
 // select node or edge, delete -> delete the selected item 
 
+
+type EditType = { type: 'edgeCreate', edgeSourceNode: NodeSingular } | { type: 'edgeWeight', edge: EdgeSingular, renderedX: number, renderedY: number, weight: string } | { type: 'none' };
+
 export const Graph = ({ mode, onShortestPath }: GraphProps) => {
     const divRef = useRef(null);
     const [graph, setGraph] = useState<Core | undefined>();
-    // in edit mode, if an edge is being created, the source from which to make it 
-    const [edgeSourceNode, setEdgeSourceNode] = useState<NodeSingular | undefined>(undefined);
-    const [selected, setSelected] = useState([] as string[]);
+    const [editType, setEditType] = useState<EditType>({ type: 'none' });
 
     useEffect(() => {
-        const handler = (event: KeyboardEvent) => {
+        const keydownHandler = (event: KeyboardEvent) => {
             console.log('Responding to key', event.key);
             if (graph && mode === 'edit') {
                 const selected =
                     graph.$(':selected')[0];
                 switch (event.key) {
+                    case 'Escape':
+                        setEditType({ type: 'none' });
+                        break;
                     case 'Backspace':
                         selected.remove()
                         break;
@@ -35,7 +39,7 @@ export const Graph = ({ mode, onShortestPath }: GraphProps) => {
                         break;
                     case 'e':
                         if (selected.isNode()) {
-                            setEdgeSourceNode(selected);
+                            setEditType({ type: 'edgeCreate', edgeSourceNode: selected })
                         }
                         break;
                     default:
@@ -44,9 +48,11 @@ export const Graph = ({ mode, onShortestPath }: GraphProps) => {
             }
 
         };
-        document.addEventListener('keydown', handler);
-        return () => document.removeEventListener('keydown', handler);
-    }, [graph, mode])
+        document.addEventListener('keydown', keydownHandler);
+        return () => {
+            document.removeEventListener('keydown', keydownHandler);
+        };
+    }, [graph, mode, editType])
 
     useEffect(() => {
         if (divRef.current) {
@@ -90,33 +96,44 @@ export const Graph = ({ mode, onShortestPath }: GraphProps) => {
 
     useEffect(() => {
         if (graph) {
-            const handler = () => {
-                if (mode === 'edit' && edgeSourceNode) {
-                    const target = graph.$(':selected')[0]
-                    if (target && target.isNode()) {
-                        graph.add({ data: { source: edgeSourceNode.id(), target: target.id(), weight: parseInt(prompt("Edge weight") || "3")} });
+            const selectHandler = () => {
+                if (mode === 'edit') {
+                    if (editType.type === 'edgeCreate') {
+                        const target = graph.$(':selected')[0]
+                        if (target && target.isNode()) {
+                            graph.add({ data: { source: editType.edgeSourceNode.id(), target: target.id(), weight: parseInt(prompt("Edge weight") || "3") } });
+                        }
                     }
                 } else if (mode === 'path_select') {
                     const selected = graph.$(':selected');
                     if (selected.length === 2) {
-                        const g = 
-                            {nodes: graph.nodes().map(node => ({id: node.id()})), edges: graph.edges().map(edge => ({source: edge.source().id(), target: edge.target().id(), weight: edge.data().weight}))}; 
+                        const g =
+                            { nodes: graph.nodes().map(node => ({ id: node.id() })), edges: graph.edges().map(edge => ({ source: edge.source().id(), target: edge.target().id(), weight: edge.data().weight })) };
                         console.log(g)
                         console.log(selected[0].id(), selected[1].id)
                         onShortestPath(
                             g,
-                            selected[0].id(), 
+                            selected[0].id(),
                             selected[1].id()
                         );
                     }
                 }
-                setEdgeSourceNode(undefined)
+                setEditType({ type: 'none' });
             };
-            graph.on('select', handler);
-            return () => graph.removeListener('select', handler);
+            const dblclickHandler = (event: any) => {
+                const currentEdge = event.target;
+                const { x, y } = event.renderedPosition;
+                setEditType({type: 'edgeWeight', edge: currentEdge, renderedX: x, renderedY: y, weight: currentEdge.data("weight")})
+            };
+            graph.on('select', selectHandler);
+            graph.on('dblclick', 'edge', dblclickHandler);
+            return () => {
+                graph.removeListener('select', selectHandler);
+                graph.removeListener('dblclick, dblclickHandler')
+            }
         }
-    }, [mode, edgeSourceNode, onShortestPath])
-    
+    }, [mode, editType, onShortestPath])
+
     useEffect(() => {
         if (graph) {
             if (mode === 'path_select') {
@@ -127,5 +144,34 @@ export const Graph = ({ mode, onShortestPath }: GraphProps) => {
         }
     })
 
-    return <div ref={divRef} style={{ width: 400, height: 400 }}></div>
+    return (
+        <>
+            <div ref={divRef} style={{ width: 400, height: 400 }}></div>
+            {editType.type === 'edgeWeight'
+                ? <input
+                    type="number"
+                    autoFocus
+                    value={editType.weight}
+                    onChange={e => setEditType({ ...editType, weight: e.currentTarget.value })}
+                    onBlur={() => {
+                        const parsedWeight = parseInt(editType.weight);
+                        if (parsedWeight) {
+                            editType.edge.data('weight', editType.weight);
+                        }
+                        setEditType({type: 'none'});
+                    }}
+                    onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                            e.currentTarget.blur();
+                        } else if (e.key === 'Escape') {
+                            setEditType({type: 'none'})
+                        }
+                        // TODO: fix document key handling doing things to edit boxes without this hack
+                        e.stopPropagation();
+                    }}
+                    style={{ position: 'absolute', width: 50, left: editType.renderedX, right: editType.renderedY }}
+                />
+                : null}
+        </>
+    )
 }
