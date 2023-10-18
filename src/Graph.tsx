@@ -1,11 +1,14 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, MutableRefObject, useEffect, useState } from "react";
 import cytoscape, { Core, EdgeSingular, NodeSingular } from "cytoscape";
+import { SubwayGraph } from "./subwayGraph";
 
 export type GraphMode = 'edit' | 'path_select' | 'display'
 
 type GraphProps = {
+    initialSubwayGraph: SubwayGraph,
     mode: GraphMode,
-    onShortestPath: (graph: any, source: string, target: string) => void
+    onShortestPath: (graph: any, source: string, target: string) => void,
+    getCurrentSubwayGraph?: MutableRefObject<() => SubwayGraph>,
 }
 
 // escape -> clear selection, clear state 
@@ -16,10 +19,16 @@ type GraphProps = {
 
 type EditType = { type: 'edgeCreate', edgeSourceNode: NodeSingular } | { type: 'edgeWeight', edge: EdgeSingular, renderedX: number, renderedY: number, weight: string } | { type: 'none' };
 
-export const Graph = ({ mode, onShortestPath }: GraphProps) => {
+export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubwayGraph }: GraphProps) => {
     const divRef = useRef(null);
     const [graph, setGraph] = useState<Core | undefined>();
     const [editType, setEditType] = useState<EditType>({ type: 'none' });
+
+    useEffect(() => {
+        if (graph && getCurrentSubwayGraph) {
+            getCurrentSubwayGraph.current = () => graphToSubwayGraph(graph);
+        }
+    }, [graph, getCurrentSubwayGraph]);
 
     useEffect(() => {
         const keydownHandler = (event: KeyboardEvent) => {
@@ -56,20 +65,9 @@ export const Graph = ({ mode, onShortestPath }: GraphProps) => {
 
     useEffect(() => {
         if (divRef.current) {
-            console.log('init cytoscape!')
             const graph = cytoscape({
                 container: divRef.current,
-                elements: [ // list of graph elements to start with
-                    { // node a
-                        data: { id: 'a' }
-                    },
-                    { // node b
-                        data: { id: 'b' }
-                    },
-                    { // edge ab
-                        data: { id: 'ab', source: 'a', target: 'b', weight: 5 }
-                    }
-                ],
+                elements: [],
                 style: [
                     {
                         selector: 'edge',
@@ -93,6 +91,13 @@ export const Graph = ({ mode, onShortestPath }: GraphProps) => {
             setGraph(graph);
         }
     }, [divRef.current])
+
+    useEffect(() => {
+        if (graph && initialSubwayGraph) {
+            initializeGraph(graph, initialSubwayGraph);
+        }
+        return () => { graph?.elements().remove(); }
+    }, [graph, initialSubwayGraph])
 
     useEffect(() => {
         if (graph) {
@@ -123,7 +128,7 @@ export const Graph = ({ mode, onShortestPath }: GraphProps) => {
             const dblclickHandler = (event: any) => {
                 const currentEdge = event.target;
                 const { x, y } = event.renderedPosition;
-                setEditType({type: 'edgeWeight', edge: currentEdge, renderedX: x, renderedY: y, weight: currentEdge.data("weight")})
+                setEditType({ type: 'edgeWeight', edge: currentEdge, renderedX: x, renderedY: y, weight: currentEdge.data("weight") })
             };
             graph.on('select', selectHandler);
             graph.on('dblclick', 'edge', dblclickHandler);
@@ -158,13 +163,13 @@ export const Graph = ({ mode, onShortestPath }: GraphProps) => {
                         if (parsedWeight) {
                             editType.edge.data('weight', editType.weight);
                         }
-                        setEditType({type: 'none'});
+                        setEditType({ type: 'none' });
                     }}
                     onKeyDown={e => {
                         if (e.key === 'Enter') {
                             e.currentTarget.blur();
                         } else if (e.key === 'Escape') {
-                            setEditType({type: 'none'})
+                            setEditType({ type: 'none' })
                         }
                         // TODO: fix document key handling doing things to edit boxes without this hack
                         e.stopPropagation();
@@ -174,4 +179,36 @@ export const Graph = ({ mode, onShortestPath }: GraphProps) => {
                 : null}
         </>
     )
+}
+
+function initializeGraph(core: Core, subwayGraph: SubwayGraph) {
+    for (const node of subwayGraph.nodes) {
+        core.add({ group: 'nodes', data: { id: node.id }, position: node.position });
+    }
+    for (const edge of subwayGraph.edges) {
+        core.add({ group: 'edges', data: { ...edge } })
+    }
+}
+
+function graphToSubwayGraph(core: Core): SubwayGraph {
+    const nodes = [];
+    for (const node of core.nodes()) {
+        nodes.push({
+            id: node.id(),
+            position: node.position(),
+        });
+    }
+    const edges = [];
+    for (const edge of core.edges()) {
+        edges.push({
+            id: edge.id(),
+            weight: parseInt(edge.data().weight),
+            source: edge.source().id(),
+            target: edge.target().id(),
+        });
+    }
+    return {
+        nodes,
+        edges
+    }
 }
