@@ -11,6 +11,7 @@ export const SubwayGraph = z.object({
   })),
   edges: z.array(z.object({
       id: z.string(),
+      type: z.enum(["walk", "track"]),
       source: z.string(),
       target: z.string(),
       weight: z.number(),

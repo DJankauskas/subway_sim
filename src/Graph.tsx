@@ -46,6 +46,16 @@ export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubw
                     case 'n':
                         graph.add({ data: { name: '' } })
                         break;
+                    case 'w':
+                        if (selected.isEdge()) {
+                            selected.data("type", "walk");
+                        }
+                        break;
+                    case 't':
+                        if (selected.isEdge()) {
+                            selected.data("type", "track");
+                        }
+                        break;
                     case 'e':
                         if (selected.isNode()) {
                             setEditType({ type: 'edgeCreate', edgeSourceNode: selected })
@@ -79,6 +89,12 @@ export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubw
                         },
                     },
                     {
+                        selector: 'edge[type="walk"]',
+                        style: {
+                            'line-style': 'dashed',
+                        },
+                    },
+                    {
                         selector: 'node',
                         style: {
                             'label': 'data(name)',
@@ -106,7 +122,7 @@ export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubw
                     if (editType.type === 'edgeCreate') {
                         const target = graph.$(':selected')[0]
                         if (target && target.isNode()) {
-                            graph.add({ data: { source: editType.edgeSourceNode.id(), target: target.id(), weight: parseInt(prompt("Edge weight") || "3") } });
+                            graph.add({ data: { source: editType.edgeSourceNode.id(), target: target.id(), weight: parseInt(prompt("Edge weight") || "3"), type: "track" } });
                         }
                     }
                 } else if (mode === 'path_select') {
@@ -251,6 +267,7 @@ function graphToSubwayGraph(core: Core): SubwayGraph {
         edges.push({
             id: edge.id(),
             weight: parseInt(edge.data().weight),
+            type: edge.data().type,
             source: edge.source().id(),
             target: edge.target().id(),
         });
