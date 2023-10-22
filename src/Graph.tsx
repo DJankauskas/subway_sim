@@ -17,7 +17,7 @@ type GraphProps = {
 // select node or edge, delete -> delete the selected item 
 
 
-type EditType = { type: 'edgeCreate', edgeSourceNode: NodeSingular } | { type: 'edgeWeight', edge: EdgeSingular, renderedX: number, renderedY: number, weight: string } | { type: 'none' };
+type EditType = { type: 'edgeCreate', edgeSourceNode: NodeSingular } | { type: 'edgeWeight', edge: EdgeSingular, renderedX: number, renderedY: number, weight: string } | { type: 'nodeName', node: NodeSingular, renderedX: number, renderedY: number, name: string } | { type: 'none' };
 
 export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubwayGraph }: GraphProps) => {
     const divRef = useRef(null);
@@ -44,7 +44,7 @@ export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubw
                         selected.remove()
                         break;
                     case 'n':
-                        graph.add({ data: {} })
+                        graph.add({ data: { name: '' } })
                         break;
                     case 'e':
                         if (selected.isNode()) {
@@ -81,7 +81,7 @@ export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubw
                     {
                         selector: 'node',
                         style: {
-                            'label': 'data(id)',
+                            'label': 'data(name)',
                             'text-valign': 'center',
                             'text-halign': 'center',
                         }
@@ -125,16 +125,23 @@ export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubw
                 }
                 setEditType({ type: 'none' });
             };
-            const dblclickHandler = (event: any) => {
+            const edgeDblclickHandler = (event: any) => {
                 const currentEdge = event.target;
                 const { x, y } = event.renderedPosition;
                 setEditType({ type: 'edgeWeight', edge: currentEdge, renderedX: x, renderedY: y, weight: currentEdge.data("weight") })
             };
+            const nodeDblclickHandler = (event: any) => {
+                const currentNode = event.target;
+                const { x, y } = event.renderedPosition;
+                setEditType({ type: 'nodeName', node: currentNode, renderedX: x, renderedY: y, name: currentNode.data("name") })
+            }
             graph.on('select', selectHandler);
-            graph.on('dblclick', 'edge', dblclickHandler);
+            graph.on('dblclick', 'edge', edgeDblclickHandler);
+            graph.on('dblclick', 'node', nodeDblclickHandler);
             return () => {
-                graph.removeListener('select', selectHandler);
-                graph.removeListener('dblclick, dblclickHandler')
+                graph.removeListener('select', selectHandler)
+                    .removeListener('dblclick', edgeDblclickHandler)
+                    .removeListener('dblclick', nodeDblclickHandler);
             }
         }
     }, [mode, editType, onShortestPath])
@@ -153,37 +160,77 @@ export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubw
         <>
             <div ref={divRef} style={{ width: 400, height: 400 }}></div>
             {editType.type === 'edgeWeight'
-                ? <input
+                ? <GraphPropertyInput
                     type="number"
-                    autoFocus
-                    value={editType.weight}
-                    onChange={e => setEditType({ ...editType, weight: e.currentTarget.value })}
-                    onBlur={() => {
+                    onChange={value => setEditType({ ...editType, weight: value })}
+                    onSubmit={() => {
                         const parsedWeight = parseInt(editType.weight);
                         if (parsedWeight) {
                             editType.edge.data('weight', editType.weight);
                         }
-                        setEditType({ type: 'none' });
+                        setEditType({ type: 'none' })
                     }}
-                    onKeyDown={e => {
-                        if (e.key === 'Enter') {
-                            e.currentTarget.blur();
-                        } else if (e.key === 'Escape') {
-                            setEditType({ type: 'none' })
-                        }
-                        // TODO: fix document key handling doing things to edit boxes without this hack
-                        e.stopPropagation();
+                    onCancel={() => setEditType({ type: 'none' })}
+                    value={editType.weight}
+                    x={editType.renderedX}
+                    y={editType.renderedY}
+                />
+                : null}
+            {editType.type === 'nodeName'
+                ? <GraphPropertyInput
+                    type="text"
+                    onChange={value => setEditType({ ...editType, name: value })}
+                    onSubmit={() => {
+                        editType.node.data('name', editType.name);
+                        setEditType({ type: 'none' })
                     }}
-                    style={{ position: 'absolute', width: 50, left: editType.renderedX, right: editType.renderedY }}
+                    onCancel={() => setEditType({ type: 'none' })}
+                    value={editType.name}
+                    x={editType.renderedX}
+                    y={editType.renderedY}
                 />
                 : null}
         </>
     )
 }
 
+interface GraphPropertyInputProps {
+    type: string,
+    value: string,
+    onChange: (value: string) => void,
+    onSubmit: () => void,
+    onCancel: () => void,
+    x: number,
+    y: number,
+
+}
+
+const GraphPropertyInput = ({ type, value, onChange, onSubmit, onCancel: onClose, x, y }: GraphPropertyInputProps) => (
+
+    <input
+        type={type}
+        autoFocus
+        value={value}
+        onChange={e => onChange(e.currentTarget.value)}
+        onBlur={() => {
+            onSubmit();
+        }}
+        onKeyDown={e => {
+            if (e.key === 'Enter') {
+                e.currentTarget.blur();
+            } else if (e.key === 'Escape') {
+                onClose();
+            }
+            // TODO: fix document key handling doing things to edit boxes without this hack
+            e.stopPropagation();
+        }}
+        style={{ position: 'absolute', width: 50, left: x, right: y }}
+    />
+);
+
 function initializeGraph(core: Core, subwayGraph: SubwayGraph) {
     for (const node of subwayGraph.nodes) {
-        core.add({ group: 'nodes', data: { id: node.id }, position: node.position });
+        core.add({ group: 'nodes', data: { id: node.id, name: node.name }, position: node.position });
     }
     for (const edge of subwayGraph.edges) {
         core.add({ group: 'edges', data: { ...edge } })
@@ -195,6 +242,7 @@ function graphToSubwayGraph(core: Core): SubwayGraph {
     for (const node of core.nodes()) {
         nodes.push({
             id: node.id(),
+            name: node.data().name,
             position: node.position(),
         });
     }
