@@ -16,6 +16,12 @@ export const SubwayGraph = z.object({
       target: z.string(),
       weight: z.number(),
   })),
+  routes: z.record(z.string(), z.object({
+    name: z.string(),
+    id: z.string(),
+    nodes: z.array(z.string()),
+    edges: z.array(z.string()),
+  }))
 });
 export type SubwayGraph = z.infer<typeof SubwayGraph>;
 
@@ -23,5 +29,6 @@ export function defaultSubwayGraph(): SubwayGraph {
     return {
         nodes: [],
         edges: [],
+        routes: {},
     }
 }

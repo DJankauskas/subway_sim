@@ -42,7 +42,11 @@ function App() {
         </div>
         <div>
           <input type="radio" value="path_select" checked={mode === "path_select"} onChange={handleMode} />
-          <label htmlFor="path select">Shortest path</label>
+          <label htmlFor="path_select">Shortest path</label>
+        </div>
+        <div>
+          <input type="radio" value="route_edit" checked={mode === "route_edit"} onChange={handleMode} />
+          <label htmlFor="route_edit">Route creation</label>
         </div>
       </div>
       <div>
@@ -68,6 +72,9 @@ function App() {
           }
         }}>Save</button>
       </div>
+      <button onClick={async () => {
+        await invoke('run_simulation', {jsGraph: getSubwayGraph.current()})
+      }}>Simulate</button>
     </div>
   )
 }

@@ -2,7 +2,7 @@ import { useRef, MutableRefObject, useEffect, useState } from "react";
 import cytoscape, { Core, EdgeSingular, NodeSingular } from "cytoscape";
 import { SubwayGraph } from "./subwayGraph";
 
-export type GraphMode = 'edit' | 'path_select' | 'display'
+export type GraphMode = 'edit' | 'path_select' | 'route_edit' | 'display'
 
 type GraphProps = {
     initialSubwayGraph: SubwayGraph,
@@ -23,12 +23,13 @@ export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubw
     const divRef = useRef(null);
     const [graph, setGraph] = useState<Core | undefined>();
     const [editType, setEditType] = useState<EditType>({ type: 'none' });
+    const [routes, setRoutes] = useState<SubwayGraph["routes"]>({});
 
     useEffect(() => {
         if (graph && getCurrentSubwayGraph) {
-            getCurrentSubwayGraph.current = () => graphToSubwayGraph(graph);
+            getCurrentSubwayGraph.current = () => graphToSubwayGraph(graph, routes);
         }
-    }, [graph, getCurrentSubwayGraph]);
+    }, [graph, getCurrentSubwayGraph, routes]);
 
     useEffect(() => {
         const keydownHandler = (event: KeyboardEvent) => {
@@ -63,7 +64,26 @@ export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubw
                         break;
                     default:
                 }
-
+            } else if (mode === 'route_edit') {
+                if (event.key === 'Enter') {
+                    console.log('Enter pressed!')
+                    const selected = graph!.$(':selected');
+                    const route = {
+                        name: 'TODO',
+                        id: (Math.floor(Math.random() * 2 ** 50)).toString(),
+                        nodes: [] as string[],
+                        edges: [] as string[],
+                    }
+                    selected.filter('node').forEach(node => { route.nodes.push(node.id()) });
+                    selected.filter('edge').forEach(edge => { route.edges.push(edge.id()) });
+                    selected.unselect();
+                    setRoutes({...routes, [route.id]: route});
+                }
+            } else if (mode === 'display') {
+                if (event.key === 'r') {
+                    // reset viewport settings
+                    graph?.reset();
+                }
             }
 
         };
@@ -111,6 +131,8 @@ export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubw
     useEffect(() => {
         if (graph && initialSubwayGraph) {
             initializeGraph(graph, initialSubwayGraph);
+            setRoutes(initialSubwayGraph.routes);
+            graph.reset();
         }
         return () => { graph?.elements().remove(); }
     }, [graph, initialSubwayGraph])
@@ -137,6 +159,7 @@ export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubw
                             selected[0].id(),
                             selected[1].id()
                         );
+                        selected.unselect();
                     }
                 }
                 setEditType({ type: 'none' });
@@ -164,13 +187,13 @@ export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubw
 
     useEffect(() => {
         if (graph) {
-            if (mode === 'path_select') {
+            if (mode === 'path_select' || mode === 'route_edit') {
                 graph.selectionType('additive')
             } else {
                 graph.selectionType('single')
             }
         }
-    })
+    }, [mode]);
 
     return (
         <>
@@ -253,7 +276,7 @@ function initializeGraph(core: Core, subwayGraph: SubwayGraph) {
     }
 }
 
-function graphToSubwayGraph(core: Core): SubwayGraph {
+function graphToSubwayGraph(core: Core, routes: SubwayGraph["routes"]): SubwayGraph {
     const nodes = [];
     for (const node of core.nodes()) {
         nodes.push({
@@ -274,6 +297,7 @@ function graphToSubwayGraph(core: Core): SubwayGraph {
     }
     return {
         nodes,
-        edges
+        edges,
+        routes,
     }
 }
