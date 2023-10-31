@@ -218,7 +218,6 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                 if (graph) {
                     const results = await onSimulate(serializeGraph(graph), routes);
                     renderTrainPositions(graph, results);
-                    clearTrains(graph);
                 }
             }}>Simulate</button>
             {editType.type === 'edgeWeight'
@@ -360,7 +359,10 @@ function setTrainPositions(graph: cytoscape.Core, trainPositions: TrainPositions
 
 function renderTrainPositions(graph: cytoscape.Core, trainPositions: TrainPositions[]) {
     function impl(graph: cytoscape.Core, trainPositions: TrainPositions[], pos: number) {
-        if (pos >= trainPositions.length) return;
+        if (pos >= trainPositions.length) {
+            setTimeout(() => clearTrains(graph));
+            return;
+        }
         setTimeout(() => {
             setTrainPositions(graph, trainPositions[pos]);
             impl(graph, trainPositions, pos + 1);

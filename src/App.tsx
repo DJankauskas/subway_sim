@@ -21,8 +21,9 @@ async function shortestPath(graph: any, source: string, target: string): Promise
 
 
 async function runSimulation(graph: any, routes: any): Promise<TrainPositions[]> {
-  const results = await invoke('run_simulation', {jsGraph: graph, jsRoutes: routes}) as TrainPositions[];
-  return results.slice(60, 181)
+  const result = await invoke('run_simulation', {jsGraph: graph, jsRoutes: routes});
+  console.log(result);
+  return result as any;
 }
 
 

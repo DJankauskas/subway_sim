@@ -139,7 +139,7 @@ async fn run_simulation(js_graph: JsGraph, js_routes: JsRoutes) -> Result<Vec<Js
         })
     }
     let mut simulator = Simulator::new(subway_map, routes);
-    let train_positions = simulator.run(240);
+    let train_positions = simulator.run(90);
     let js_train_positions: Vec<_> = train_positions
         .into_iter()
         .map(|t| JsTrainPositions {
