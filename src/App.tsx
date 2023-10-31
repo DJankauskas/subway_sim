@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/tauri";
 import {open, save} from "@tauri-apps/api/dialog";
 import {readTextFile, writeTextFile} from "@tauri-apps/api/fs";
 
-import { Graph, GraphMode, TrainPositions } from "./Graph";
+import { Graph, GraphMode, SimulationResults, TrainPositions } from "./Graph";
 import {SubwayGraph, defaultSubwayGraph} from "./subwayGraph";
 import "./App.css";
 
@@ -20,7 +20,7 @@ async function shortestPath(graph: any, source: string, target: string): Promise
 }
 
 
-async function runSimulation(graph: any, routes: any): Promise<TrainPositions[]> {
+async function runSimulation(graph: any, routes: any): Promise<SimulationResults> {
   const result = await invoke('run_simulation', {jsGraph: graph, jsRoutes: routes});
   console.log(result);
   return result as any;

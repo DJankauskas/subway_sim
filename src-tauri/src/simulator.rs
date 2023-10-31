@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::Hash;
 
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -33,6 +34,7 @@ pub struct Track {
 pub struct Station {
     pub id: StationId,
     pub train: Option<TrainId>,
+    pub arrival_times: HashMap<RouteId, Vec<u32>>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -42,7 +44,7 @@ pub enum TrackStationId {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub struct RouteId(u32);
+pub struct RouteId(pub u32);
 
 #[derive(Debug)]
 pub struct Route {
@@ -72,6 +74,15 @@ pub struct TrainPosition {
     pub pos: f64,
 }
 
+pub struct StationStatistic {
+    pub arrival_times: HashMap<RouteId, Vec<u32>>,
+}
+
+pub struct SimulationResults {
+    pub train_positions: Vec<TrainPositions>,
+    pub station_statistics: HashMap<StationId, StationStatistic>,
+}
+
 const STATION_DWELL_TIME: f64 = 1.0;
 const MIN_TRAIN_DISTANCE: f64 = 1.0;
 const TIME_STEP: f64 = 1.0;
@@ -95,6 +106,7 @@ impl Simulator {
                 Station {
                     id: node,
                     train: None,
+                    arrival_times: HashMap::new(),
                 },
             );
         }
@@ -152,7 +164,7 @@ impl Simulator {
         }
     }
 
-    pub fn run(&mut self, iterations: i32) -> Vec<TrainPositions> {
+    pub fn run(mut self, iterations: i32) -> SimulationResults {
         let traversal_order = self.traversal_order.clone();
         println!("{:?}", traversal_order);
         for (_, route) in &self.routes {
@@ -239,8 +251,17 @@ impl Simulator {
                                     .unwrap()
                                     .train
                                     .is_none());
-                                self.stations.get_mut(&next_station_id).unwrap().train =
-                                    Some(curr_train_id);
+                                let next_station_mut =
+                                    self.stations.get_mut(&next_station_id).unwrap();
+                                next_station_mut.train = Some(curr_train_id);
+                                if t >= 0 {
+                                    next_station_mut
+                                        .arrival_times
+                                        .entry(curr_train_mut.route)
+                                        .or_default()
+                                        .push(t as u32);
+                                }
+
                                 curr_train_mut.pos = time_left;
                                 curr_train_mut.curr_section =
                                     TrackStationId::Station(next_station_id);
@@ -270,6 +291,13 @@ impl Simulator {
                         };
 
                         start_station_mut.train = Some(self.curr_train_id);
+                        if t >= 0 {
+                            start_station_mut
+                                .arrival_times
+                                .entry(*id)
+                                .or_default()
+                                .push(t as u32);
+                        }
                         self.trains.insert(self.curr_train_id, train);
                         self.curr_train_id = TrainId(self.curr_train_id.0 + 1);
                     }
@@ -295,7 +323,22 @@ impl Simulator {
 
             t += 1;
         }
-        train_positions
+
+        SimulationResults {
+            train_positions,
+            station_statistics: self
+                .stations
+                .into_iter()
+                .map(|(id, s)| {
+                    (
+                        id,
+                        StationStatistic {
+                            arrival_times: s.arrival_times,
+                        },
+                    )
+                })
+                .collect(),
+        }
     }
 }
 

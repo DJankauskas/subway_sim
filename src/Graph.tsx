@@ -15,11 +15,20 @@ export interface TrainPosition {
     pos: number,
 }
 
+export interface SimulationResults {
+    train_positions: TrainPositions[],
+    station_statistics: Record<string, StationStatistic>,
+}
+
+interface StationStatistic {
+   arrival_times: Record<string, {min_wait: number, max_wait: number, average_wait: number}>, 
+}
+
 type GraphProps = {
     initialSubwayGraph: SubwayGraph,
     mode: GraphMode,
     onShortestPath: (graph: any, source: string, target: string) => void,
-    onSimulate: (graph: any, routes: any) => Promise<TrainPositions[]>,
+    onSimulate: (graph: any, routes: any) => Promise<SimulationResults>,
     getCurrentSubwayGraph?: MutableRefObject<() => SubwayGraph>,
 }
 
@@ -36,6 +45,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
     const [graph, setGraph] = useState<Core | undefined>();
     const [editType, setEditType] = useState<EditType>({ type: 'none' });
     const [routes, setRoutes] = useState<SubwayGraph["routes"]>({});
+    const [stationStatistics, setStationStatistics] = useState<Record<string, StationStatistic> | null>(null);
 
     useEffect(() => {
         if (graph && getCurrentSubwayGraph) {
@@ -185,6 +195,14 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                 const { x, y } = event.renderedPosition;
                 setEditType({ type: 'edgeWeight', edge: currentEdge, renderedX: x, renderedY: y, weight: currentEdge.data("weight") })
             };
+            const nodeClickHandler = (event: any) => {
+                const currentNode = event.target;
+                const statistic = stationStatistics?.[currentNode.id()];
+                if (statistic) {
+                    console.log(routes);
+                    console.log(statistic);
+                }
+            }
             const nodeDblclickHandler = (event: any) => {
                 const currentNode = event.target;
                 const { x, y } = event.renderedPosition;
@@ -192,14 +210,16 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
             }
             graph.on('select', selectHandler);
             graph.on('dblclick', 'edge', edgeDblclickHandler);
+            graph.on('click', 'node', nodeClickHandler);
             graph.on('dblclick', 'node', nodeDblclickHandler);
             return () => {
                 graph.removeListener('select', selectHandler)
                     .removeListener('dblclick', edgeDblclickHandler)
+                    .removeListener('click', nodeClickHandler)
                     .removeListener('dblclick', nodeDblclickHandler);
             }
         }
-    }, [mode, editType, onShortestPath])
+    }, [mode, editType, stationStatistics, onShortestPath])
 
     useEffect(() => {
         if (graph) {
@@ -217,7 +237,8 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
             <button onClick={async () => {
                 if (graph) {
                     const results = await onSimulate(serializeGraph(graph), routes);
-                    renderTrainPositions(graph, results);
+                    renderTrainPositions(graph, results.train_positions);
+                    setStationStatistics(results.station_statistics);
                 }
             }}>Simulate</button>
             {editType.type === 'edgeWeight'

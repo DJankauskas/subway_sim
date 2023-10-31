@@ -101,10 +101,15 @@ fn shortest_path(js_graph: JsGraph, source: &str, target: &str) -> Option<Shorte
 }
 
 #[tauri::command]
-async fn run_simulation(js_graph: JsGraph, js_routes: JsRoutes) -> Result<Vec<JsTrainPositions>, String> {
+async fn run_simulation(
+    js_graph: JsGraph,
+    js_routes: JsRoutes,
+) -> Result<JsSimulationResults, String> {
     eprintln!("start running simulation");
     let mut routes = Vec::with_capacity(js_routes.len());
     let (subway_map, cytoscape_id_map, petgraph_map) = js_graph_to_subway_map(js_graph.clone());
+    
+    let mut route_id_map = Vec::new();
 
     for (_, route) in js_routes {
         let mut station_to = HashMap::with_capacity(route.nodes.len());
@@ -136,11 +141,13 @@ async fn run_simulation(js_graph: JsGraph, js_routes: JsRoutes) -> Result<Vec<Js
         routes.push(Route {
             start_station: start_station.expect("a station in the route with no incoming edges"),
             station_to,
-        })
+        });
+        route_id_map.push(route.id.clone());
     }
-    let mut simulator = Simulator::new(subway_map, routes);
-    let train_positions = simulator.run(90);
-    let js_train_positions: Vec<_> = train_positions
+    let simulator = Simulator::new(subway_map, routes);
+    let simulation_results = simulator.run(90);
+    let train_positions: Vec<_> = simulation_results
+        .train_positions
         .into_iter()
         .map(|t| JsTrainPositions {
             time: t.time,
@@ -156,7 +163,39 @@ async fn run_simulation(js_graph: JsGraph, js_routes: JsRoutes) -> Result<Vec<Js
         })
         .collect();
 
-    Ok(js_train_positions)
+    let station_statistics = simulation_results
+        .station_statistics
+        .into_iter()
+        .map(|(id, s)| {
+            (
+                petgraph_map[&TrackStationId::Station(id)].clone(),
+                JsStationStatistic {
+                    arrival_times: s.arrival_times.into_iter().map(|(r_id, data)| {
+                        let mut differences = Vec::with_capacity(data.len());
+                        let mut prev_time = data.first().copied().unwrap_or_default();
+                        for i in 1..data.len() {
+                            differences.push(data[i] - prev_time);
+                            prev_time = data[i];
+                        }
+
+                        (
+                            route_id_map[r_id.0 as usize].clone(),
+                            JsArrivalStats {
+                                min_wait: differences.iter().min().copied().unwrap_or_default(),
+                                max_wait: differences.iter().max().copied().unwrap_or_default(),
+                                average_wait: differences.iter().sum::<u32>() / differences.len() as u32,
+                            },
+                        )
+                    }).collect(),
+                },
+            )
+        })
+        .collect();
+
+    Ok(JsSimulationResults {
+        train_positions,
+        station_statistics,
+    })
 }
 
 #[derive(Serialize)]
@@ -170,6 +209,24 @@ struct JsTrainPosition {
 struct JsTrainPositions {
     pub time: u32,
     pub trains: Vec<JsTrainPosition>,
+}
+
+#[derive(Serialize)]
+struct JsStationStatistic {
+    pub arrival_times: HashMap<String, JsArrivalStats>,
+}
+
+#[derive(Serialize)]
+struct JsArrivalStats {
+    pub min_wait: u32,
+    pub max_wait: u32,
+    pub average_wait: u32,
+}
+
+#[derive(Serialize)]
+struct JsSimulationResults {
+    pub train_positions: Vec<JsTrainPositions>,
+    pub station_statistics: HashMap<String, JsStationStatistic>,
 }
 
 fn main() {
