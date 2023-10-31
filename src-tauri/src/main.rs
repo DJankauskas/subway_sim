@@ -2,7 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod simulator;
-use simulator::{Route, Simulator, SubwayMap};
+use simulator::{Route, Simulator, SubwayMap, TrackStationId};
 
 use std::collections::{HashMap, HashSet};
 
@@ -19,6 +19,7 @@ struct JsNode {
 
 #[derive(Deserialize, Serialize, Clone, Hash, PartialEq, Eq)]
 struct JsEdge {
+    id: String,
     source: String,
     target: String,
     weight: u16,
@@ -36,8 +37,9 @@ struct JsRoute {
 struct JsGraph {
     nodes: Vec<JsNode>,
     edges: Vec<JsEdge>,
-    routes: HashMap<String, JsRoute>,
 }
+
+type JsRoutes = HashMap<String, JsRoute>;
 
 #[derive(Serialize)]
 struct ShortestPath {
@@ -46,27 +48,36 @@ struct ShortestPath {
 }
 
 // TODO: clean up HashMap return situation
-fn js_graph_to_subway_map(js_graph: JsGraph) -> (SubwayMap, HashMap<String, NodeIndex>) {
+fn js_graph_to_subway_map(
+    js_graph: JsGraph,
+) -> (
+    SubwayMap,
+    HashMap<String, NodeIndex>,
+    HashMap<TrackStationId, String>,
+) {
     let mut graph: SubwayMap = Graph::new();
-    let mut map = HashMap::new();
+    let mut cytoscape_map = HashMap::new();
+    let mut petgraph_map = HashMap::new();
     for node in js_graph.nodes {
         let node_id = graph.add_node(node.id.clone());
-        map.insert(node.id, node_id);
+        cytoscape_map.insert(node.id.clone(), node_id);
+        petgraph_map.insert(TrackStationId::Station(node_id), node.id);
     }
     for edge in js_graph.edges {
-        graph.add_edge(
-            *map.get(&edge.source).unwrap(),
-            *map.get(&edge.target).unwrap(),
+        let edge_id = graph.add_edge(
+            *cytoscape_map.get(&edge.source).unwrap(),
+            *cytoscape_map.get(&edge.target).unwrap(),
             edge.weight,
         );
+        petgraph_map.insert(TrackStationId::Track(edge_id), edge.id.clone());
     }
-    (graph, map)
+    (graph, cytoscape_map, petgraph_map)
 }
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 #[tauri::command]
 fn shortest_path(js_graph: JsGraph, source: &str, target: &str) -> Option<ShortestPath> {
-    let (graph, map) = js_graph_to_subway_map(js_graph);
+    let (graph, map, _) = js_graph_to_subway_map(js_graph);
 
     let end = *map.get(target).unwrap();
 
@@ -90,14 +101,18 @@ fn shortest_path(js_graph: JsGraph, source: &str, target: &str) -> Option<Shorte
 }
 
 #[tauri::command]
-async fn run_simulation(js_graph: JsGraph) -> Result<(), String> {
+async fn run_simulation(js_graph: JsGraph, js_routes: JsRoutes) -> Result<Vec<JsTrainPositions>, String> {
     eprintln!("start running simulation");
-    let mut routes = Vec::with_capacity(js_graph.routes.len());
-    let (subway_map, node_id_map) = js_graph_to_subway_map(js_graph.clone());
+    let mut routes = Vec::with_capacity(js_routes.len());
+    let (subway_map, cytoscape_id_map, petgraph_map) = js_graph_to_subway_map(js_graph.clone());
 
-    for (_, route) in js_graph.routes {
+    for (_, route) in js_routes {
         let mut station_to = HashMap::with_capacity(route.nodes.len());
-        let node_ids: HashSet<_> = route.nodes.into_iter().map(|id| node_id_map[&id]).collect();
+        let node_ids: HashSet<_> = route
+            .nodes
+            .into_iter()
+            .map(|id| cytoscape_id_map[&id])
+            .collect();
 
         let mut start_station = None;
 
@@ -124,8 +139,37 @@ async fn run_simulation(js_graph: JsGraph) -> Result<(), String> {
         })
     }
     let mut simulator = Simulator::new(subway_map, routes);
-    simulator.run(360);
-    Ok(())
+    let train_positions = simulator.run(240);
+    let js_train_positions: Vec<_> = train_positions
+        .into_iter()
+        .map(|t| JsTrainPositions {
+            time: t.time,
+            trains: t
+                .trains
+                .into_iter()
+                .map(|p| JsTrainPosition {
+                    id: p.id.0,
+                    curr_section: petgraph_map[&p.curr_section].clone(),
+                    pos: p.pos,
+                })
+                .collect(),
+        })
+        .collect();
+
+    Ok(js_train_positions)
+}
+
+#[derive(Serialize)]
+struct JsTrainPosition {
+    pub id: u32,
+    pub curr_section: String,
+    pub pos: f64,
+}
+
+#[derive(Serialize)]
+struct JsTrainPositions {
+    pub time: u32,
+    pub trains: Vec<JsTrainPosition>,
 }
 
 fn main() {

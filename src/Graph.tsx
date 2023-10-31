@@ -4,10 +4,22 @@ import { SubwayGraph } from "./subwayGraph";
 
 export type GraphMode = 'edit' | 'path_select' | 'route_edit' | 'display'
 
+export interface TrainPositions {
+    time: number,
+    trains: TrainPosition[]
+}
+
+export interface TrainPosition {
+    id: number,
+    curr_section: string,
+    pos: number,
+}
+
 type GraphProps = {
     initialSubwayGraph: SubwayGraph,
     mode: GraphMode,
     onShortestPath: (graph: any, source: string, target: string) => void,
+    onSimulate: (graph: any, routes: any) => Promise<TrainPositions[]>,
     getCurrentSubwayGraph?: MutableRefObject<() => SubwayGraph>,
 }
 
@@ -19,7 +31,7 @@ type GraphProps = {
 
 type EditType = { type: 'edgeCreate', edgeSourceNode: NodeSingular } | { type: 'edgeWeight', edge: EdgeSingular, renderedX: number, renderedY: number, weight: string } | { type: 'nodeName', node: NodeSingular, renderedX: number, renderedY: number, name: string } | { type: 'none' };
 
-export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubwayGraph }: GraphProps) => {
+export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, getCurrentSubwayGraph }: GraphProps) => {
     const divRef = useRef(null);
     const [graph, setGraph] = useState<Core | undefined>();
     const [editType, setEditType] = useState<EditType>({ type: 'none' });
@@ -77,15 +89,13 @@ export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubw
                     selected.filter('node').forEach(node => { route.nodes.push(node.id()) });
                     selected.filter('edge').forEach(edge => { route.edges.push(edge.id()) });
                     selected.unselect();
-                    setRoutes({...routes, [route.id]: route});
+                    setRoutes({ ...routes, [route.id]: route });
                 }
-            } else if (mode === 'display') {
-                if (event.key === 'r') {
-                    // reset viewport settings
-                    graph?.reset();
-                }
+            } 
+            if (event.key === 'r') {
+                // reset viewport settings
+                graph?.reset();
             }
-
         };
         document.addEventListener('keydown', keydownHandler);
         return () => {
@@ -121,6 +131,12 @@ export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubw
                             'text-valign': 'center',
                             'text-halign': 'center',
                         }
+                    },
+                    {
+                        selector: 'node[type="train"]',
+                        style: {
+                            'background-color': 'red'
+                        }
                     }
                 ]
             });
@@ -151,7 +167,7 @@ export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubw
                     const selected = graph.$(':selected');
                     if (selected.length === 2) {
                         const g =
-                            { nodes: graph.nodes().map(node => ({ id: node.id() })), edges: graph.edges().map(edge => ({ source: edge.source().id(), target: edge.target().id(), weight: edge.data().weight })) };
+                            serializeGraph(graph);
                         console.log(g)
                         console.log(selected[0].id(), selected[1].id)
                         onShortestPath(
@@ -197,7 +213,14 @@ export const Graph = ({ initialSubwayGraph, mode, onShortestPath, getCurrentSubw
 
     return (
         <>
-            <div ref={divRef} style={{ width: 400, height: 400 }}></div>
+            <div ref={divRef} style={{ width: 800, height: 400 }}></div>
+            <button onClick={async () => {
+                if (graph) {
+                    const results = await onSimulate(serializeGraph(graph), routes);
+                    renderTrainPositions(graph, results);
+                    clearTrains(graph);
+                }
+            }}>Simulate</button>
             {editType.type === 'edgeWeight'
                 ? <GraphPropertyInput
                     type="number"
@@ -300,4 +323,56 @@ function graphToSubwayGraph(core: Core, routes: SubwayGraph["routes"]): SubwayGr
         edges,
         routes,
     }
+}
+
+function clearTrains(graph: cytoscape.Core) {
+    graph.$('node[type = "train"]').remove();
+}
+
+function setTrainPositions(graph: cytoscape.Core, trainPositions: TrainPositions) {
+    clearTrains(graph);
+    for (const train of trainPositions.trains) {
+        const element = graph.$id(train.curr_section) as NodeSingular | EdgeSingular;
+        let x = 0;
+        let y = 0;
+        if (element.isNode()) {
+            x = element.position().x;
+            y = element.position().y;
+        } else if (element.isEdge()) {
+            const sourcePos = element.source().position();
+            const targetPos = element.target().position();
+            x = sourcePos.x + (train.pos / element.data().weight) * (targetPos.x - sourcePos.x);
+            y = sourcePos.y + (train.pos / element.data().weight) * (targetPos.y - sourcePos.y);
+        } else {
+            console.log(train);
+            console.log(element);
+        }
+        graph.add({
+            group: 'nodes',
+            data: { type: 'train' },
+            position: {
+                x,
+                y,
+            }
+        });
+    }
+}
+
+function renderTrainPositions(graph: cytoscape.Core, trainPositions: TrainPositions[]) {
+    function impl(graph: cytoscape.Core, trainPositions: TrainPositions[], pos: number) {
+        if (pos >= trainPositions.length) return;
+        setTimeout(() => {
+            setTrainPositions(graph, trainPositions[pos]);
+            impl(graph, trainPositions, pos + 1);
+        }, 1000);
+    }
+
+    impl(graph, trainPositions, 0);
+}
+
+function serializeGraph(graph: cytoscape.Core): any {
+    return {
+        nodes: graph.nodes().map(node => ({ id: node.id() })),
+        edges: graph.edges().map(edge => ({ id: edge.id(), source: edge.source().id(), target: edge.target().id(), weight: edge.data().weight }))
+    };
 }

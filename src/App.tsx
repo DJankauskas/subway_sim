@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/tauri";
 import {open, save} from "@tauri-apps/api/dialog";
 import {readTextFile, writeTextFile} from "@tauri-apps/api/fs";
 
-import { Graph, GraphMode } from "./Graph";
+import { Graph, GraphMode, TrainPositions } from "./Graph";
 import {SubwayGraph, defaultSubwayGraph} from "./subwayGraph";
 import "./App.css";
 
@@ -20,6 +20,12 @@ async function shortestPath(graph: any, source: string, target: string): Promise
 }
 
 
+async function runSimulation(graph: any, routes: any): Promise<TrainPositions[]> {
+  const results = await invoke('run_simulation', {jsGraph: graph, jsRoutes: routes}) as TrainPositions[];
+  return results.slice(60, 181)
+}
+
+
 function App() {
   const [mode, setMode] = useState<GraphMode>('display');
   const getSubwayGraph = useRef(defaultSubwayGraph);
@@ -30,7 +36,7 @@ function App() {
   return (
     <div>
     <h1>Shortest Path</h1>
-      <Graph mode={mode} initialSubwayGraph={initialSubwayGraph} onShortestPath={shortestPath} getCurrentSubwayGraph={getSubwayGraph} />
+      <Graph mode={mode} initialSubwayGraph={initialSubwayGraph} onSimulate={runSimulation} onShortestPath={shortestPath} getCurrentSubwayGraph={getSubwayGraph} />
       <div>
         <div>
           <input type="radio" value="display" checked={mode === "display"} onChange={handleMode} />
@@ -55,8 +61,10 @@ function App() {
             filters: [{name: "Subway Graph", extensions: ["json"]}]
           });
           if (typeof filePath === 'string') {
-            const rawData = await readTextFile(filePath);
-            const subwayGraphResult = SubwayGraph.safeParse(JSON.parse(rawData));
+            const rawData = JSON.parse(await readTextFile(filePath));
+            rawData.nodes = rawData.nodes.filter((node: any) => typeof node.name === 'string');
+            console.log(rawData);
+            const subwayGraphResult = SubwayGraph.safeParse(rawData);
             if (!subwayGraphResult.success) {
               console.error(subwayGraphResult.error);
               return;
@@ -72,9 +80,6 @@ function App() {
           }
         }}>Save</button>
       </div>
-      <button onClick={async () => {
-        await invoke('run_simulation', {jsGraph: getSubwayGraph.current()})
-      }}>Simulate</button>
     </div>
   )
 }
