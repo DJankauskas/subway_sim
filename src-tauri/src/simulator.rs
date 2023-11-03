@@ -83,7 +83,7 @@ pub struct SimulationResults {
     pub station_statistics: HashMap<StationId, StationStatistic>,
 }
 
-const STATION_DWELL_TIME: f64 = 1.0;
+const STATION_DWELL_TIME: f64 = 0.5;
 const MIN_TRAIN_DISTANCE: f64 = 1.0;
 const TIME_STEP: f64 = 1.0;
 

@@ -369,7 +369,7 @@ function setTrainPositions(graph: cytoscape.Core, trainPositions: TrainPositions
         }
         graph.add({
             group: 'nodes',
-            data: { type: 'train' },
+            data: { type: 'train', name: '' },
             position: {
                 x,
                 y,

@@ -145,7 +145,7 @@ async fn run_simulation(
         route_id_map.push(route.id.clone());
     }
     let simulator = Simulator::new(subway_map, routes);
-    let simulation_results = simulator.run(90);
+    let simulation_results = simulator.run(45);
     let train_positions: Vec<_> = simulation_results
         .train_positions
         .into_iter()
