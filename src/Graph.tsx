@@ -1,5 +1,8 @@
 import { useRef, MutableRefObject, useEffect, useState } from "react";
 import cytoscape, { Core, EdgeSingular, NodeSingular } from "cytoscape";
+import popper from "cytoscape-popper";
+cytoscape.use(popper);
+import tippy from "tippy.js";
 import { SubwayGraph } from "./subwayGraph";
 
 export type GraphMode = 'edit' | 'path_select' | 'route_edit' | 'display'
@@ -197,8 +200,26 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
             };
             const nodeClickHandler = (event: any) => {
                 const currentNode = event.target;
-                const statistic = stationStatistics?.[currentNode.id()];
+                const statistic = stationStatistics?.[currentNode.id()].arrival_times;
                 if (statistic) {
+                    const ref = currentNode.popperRef();
+                    const dummyEle = document.createElement('div');
+                    const tip = tippy(dummyEle, {
+                        getReferenceClientRect: ref.getBoundingClientRect,
+                        trigger: 'manual',
+                        content: () => {
+                            // TODO: replace with React rendering? 
+                            const content = document.createElement('div');
+                            let innerHTML = '';
+                            console.log(content);
+                            for (const [id, data] of Object.entries(statistic)) {
+                                innerHTML += `<h3>Route ${routes[id].name}</h3><p>Average wait: ${data.average_wait}</p><p>Min wait: ${data.min_wait}</p><p>Max wait: ${data.max_wait}</p>`;
+                            }
+                            content.innerHTML = innerHTML;
+                            return content;
+                        }
+                    });
+                    tip.show();
                     console.log(routes);
                     console.log(statistic);
                 }
@@ -219,7 +240,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                     .removeListener('dblclick', nodeDblclickHandler);
             }
         }
-    }, [mode, editType, stationStatistics, onShortestPath])
+    }, [mode, routes, editType, stationStatistics, onShortestPath])
 
     useEffect(() => {
         if (graph) {

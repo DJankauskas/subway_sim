@@ -34,7 +34,7 @@ pub struct Track {
 pub struct Station {
     pub id: StationId,
     pub train: Option<TrainId>,
-    pub arrival_times: HashMap<RouteId, Vec<u32>>,
+    pub arrival_times: HashMap<RouteId, Vec<f64>>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -75,7 +75,7 @@ pub struct TrainPosition {
 }
 
 pub struct StationStatistic {
-    pub arrival_times: HashMap<RouteId, Vec<u32>>,
+    pub arrival_times: HashMap<RouteId, Vec<f64>>,
 }
 
 pub struct SimulationResults {
@@ -225,17 +225,22 @@ impl Simulator {
                         let mut i = 0;
                         let mut last_train_pos = f64::INFINITY;
                         let next_station_id = self.subway_map.edge_endpoints(track).unwrap().1;
-                        if self.stations[&next_station_id].train.is_some() {
-                            last_train_pos = track_mut.length as f64;
-                        }
                         while i < track_mut.trains.len() {
+                            if self.stations[&next_station_id].train.is_some() {
+                                last_train_pos =
+                                    f64_max(track_mut.length as f64 - MIN_TRAIN_DISTANCE, 0.0);
+                            }
                             let curr_train_id = track_mut.trains[i];
                             let curr_train_mut = self.trains.get_mut(&curr_train_id).unwrap();
                             let mut time_left = TIME_STEP;
                             let travel_distance = f64_min(
                                 time_left,
                                 f64_max(
-                                    last_train_pos - curr_train_mut.pos - MIN_TRAIN_DISTANCE,
+                                    if curr_train_mut.pos + MIN_TRAIN_DISTANCE >= last_train_pos {
+                                        last_train_pos - MIN_TRAIN_DISTANCE - curr_train_mut.pos
+                                    } else {
+                                        last_train_pos - curr_train_mut.pos
+                                    },
                                     0.0,
                                 ),
                             );
@@ -245,12 +250,14 @@ impl Simulator {
                             if curr_train_mut.pos >= track_mut.length as f64 {
                                 debug_assert_eq!(i, 0);
                                 track_mut.trains.pop_front();
-                                debug_assert!(self
-                                    .stations
-                                    .get_mut(&next_station_id)
-                                    .unwrap()
-                                    .train
-                                    .is_none());
+                                debug_assert!(
+                                    self.stations
+                                        .get_mut(&next_station_id)
+                                        .unwrap()
+                                        .train
+                                        .is_none(),
+                                    "travel distance is {travel_distance}"
+                                );
                                 let next_station_mut =
                                     self.stations.get_mut(&next_station_id).unwrap();
                                 next_station_mut.train = Some(curr_train_id);
@@ -259,7 +266,7 @@ impl Simulator {
                                         .arrival_times
                                         .entry(curr_train_mut.route)
                                         .or_default()
-                                        .push(t as u32);
+                                        .push(t as f64 + travel_distance);
                                 }
 
                                 curr_train_mut.pos = time_left;
@@ -296,7 +303,7 @@ impl Simulator {
                                 .arrival_times
                                 .entry(*id)
                                 .or_default()
-                                .push(t as u32);
+                                .push(t as f64);
                         }
                         self.trains.insert(self.curr_train_id, train);
                         self.curr_train_id = TrainId(self.curr_train_id.0 + 1);

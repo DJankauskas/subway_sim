@@ -181,9 +181,9 @@ async fn run_simulation(
                         (
                             route_id_map[r_id.0 as usize].clone(),
                             JsArrivalStats {
-                                min_wait: differences.iter().min().copied().unwrap_or_default(),
-                                max_wait: differences.iter().max().copied().unwrap_or_default(),
-                                average_wait: differences.iter().sum::<u32>() / differences.len() as u32,
+                                min_wait: differences.iter().copied().min_by(f64::total_cmp).unwrap_or_default(),
+                                max_wait: differences.iter().copied().max_by(f64::total_cmp).unwrap_or_default(),
+                                average_wait: differences.iter().sum::<f64>() / differences.len() as f64,
                             },
                         )
                     }).collect(),
@@ -218,9 +218,9 @@ struct JsStationStatistic {
 
 #[derive(Serialize)]
 struct JsArrivalStats {
-    pub min_wait: u32,
-    pub max_wait: u32,
-    pub average_wait: u32,
+    pub min_wait: f64,
+    pub max_wait: f64,
+    pub average_wait: f64,
 }
 
 #[derive(Serialize)]
