@@ -3,8 +3,10 @@ import cytoscape, { Core, EdgeSingular, NodeSingular } from "cytoscape";
 import popper from "cytoscape-popper";
 cytoscape.use(popper);
 import tippy from "tippy.js";
-import { SubwayGraph, Routes } from "./subwayGraph";
+import { SubwayGraph, Route } from "./subwayGraph";
 import { createRoot } from "react-dom/client";
+
+import { StringlineChart, Stringline, StringlinePoint, Station } from "./StringlineChart";
 
 export type GraphMode = 'edit' | 'path_select' | 'route_edit' | 'display'
 
@@ -17,10 +19,12 @@ export interface TrainPosition {
     id: number,
     curr_section: string,
     pos: number,
+    distance_travelled: number,
 }
 
 export interface SimulationResults {
     train_positions: TrainPositions[],
+    train_to_route: Record<number, string>,
     station_statistics: Record<string, StationStatistic>,
 }
 
@@ -55,8 +59,8 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
     const divRef = useRef(null);
     const [graph, setGraph] = useState<Core | undefined>();
     const [editType, setEditType] = useState<EditType>({ type: 'none' });
-    const [routes, setRoutes] = useState<Routes>({});
-    const [stationStatistics, setStationStatistics] = useState<Record<string, StationStatistic> | null>(null);
+    const [routes, setRoutes] = useState<Record<string, Route>>({});
+    const [simulationResults, setSimulationResults] = useState<SimulationResults | null>(null);
 
     useEffect(() => {
         if (graph && getCurrentSubwayGraph) {
@@ -208,7 +212,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
             };
             const nodeClickHandler = (event: any) => {
                 const currentNode = event.target;
-                const statistic = stationStatistics?.[currentNode.id()];
+                const statistic = simulationResults?.station_statistics[currentNode.id()];
                 if (statistic) {
                     const ref = currentNode.popperRef();
                     const dummyEle = document.createElement('div');
@@ -250,7 +254,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                     .removeListener('dblclick', nodeDblclickHandler);
             }
         }
-    }, [mode, routes, editType, stationStatistics, onShortestPath])
+    }, [mode, routes, editType, simulationResults, onShortestPath])
 
     useEffect(() => {
         if (graph) {
@@ -261,6 +265,8 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
             }
         }
     }, [mode]);
+    
+    const stringlineRoute = Object.keys(routes)[1];
 
     return (
         <>
@@ -269,9 +275,10 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                 if (graph) {
                     const results = await onSimulate(serializeGraph(graph), routes);
                     renderTrainPositions(graph, results.train_positions);
-                    setStationStatistics(results.station_statistics);
+                    setSimulationResults(results);
                 }
             }}>Simulate</button>
+            {simulationResults ? <StringlineChart stations={namedStationsOfRoute(routes[stringlineRoute], initialSubwayGraph)} stringlines={trainPositionsToStringlines(simulationResults.train_positions, simulationResults.train_to_route, 60, new Set([stringlineRoute]))} /> : null}
             {editType.type === 'edgeWeight'
                 ? <GraphPropertyInput
                     type="number"
@@ -395,9 +402,8 @@ function setTrainPositions(graph: cytoscape.Core, trainPositions: TrainPositions
             x = sourcePos.x + (train.pos / element.data().weight) * (targetPos.x - sourcePos.x);
             y = sourcePos.y + (train.pos / element.data().weight) * (targetPos.y - sourcePos.y);
         } else {
-            console.log(train);
-            console.log(element);
-        }
+            continue;
+        }         
         graph.add({
             group: 'nodes',
             data: { type: 'train', name: '' },
@@ -431,7 +437,7 @@ function serializeGraph(graph: cytoscape.Core): any {
     };
 }
 
-const StationStatisticTooltip = ({ statistic, routes }: { statistic: StationStatistic, routes: Routes }) => {
+const StationStatisticTooltip = ({ statistic, routes }: { statistic: StationStatistic, routes: Record<string, Route> }) => {
     return (
         <div>
             {
@@ -455,4 +461,41 @@ const StationStatisticTooltip = ({ statistic, routes }: { statistic: StationStat
             }
         </div>
     )
+}
+
+function trainPositionsToStringlines(positions: TrainPositions[], trainToRoute: Record<number, string>, to: number, routes: Set<string>): Record<number, Stringline[]> {
+    const trainPositions: Record<number, StringlinePoint[]> = {};
+    for (const position of positions) {
+        if (position.time > to) break;
+        for (const train of position.trains) {
+            const positions = trainPositions[train.id] ||= [];
+            if (train.pos < 0) {
+                console.log("detected train with negative position!");
+            }
+            trainPositions[train.id].push({x: position.time, y: train.pos + train.distance_travelled});
+            train.curr_section
+        }
+    }
+    
+    console.log(trainToRoute);
+    
+    const stringlines: Record<string, Stringline[]> = {}
+    for (const route of routes) {
+        stringlines[route] = [];
+    }
+    
+    for (const [id, positions] of Object.entries(trainPositions)) {
+        const route = trainToRoute[id as any]; 
+        if (routes.has(route)) {
+            stringlines[trainToRoute[id as any]].push(positions);
+        }
+    }
+
+    return stringlines;
+}
+
+// TODO: implement
+function namedStationsOfRoute(route: Route, graph: SubwayGraph): Station[] {
+    const stations: Station[] = [];
+    return stations;
 }

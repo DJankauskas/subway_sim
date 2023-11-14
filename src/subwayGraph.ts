@@ -1,13 +1,13 @@
 import z from 'zod';
 
-export const Routes = z.record(z.string(), z.object({
+export const Route = z.object({
     name: z.string(),
     id: z.string(),
     nodes: z.array(z.string()),
     edges: z.array(z.string()),
-}));
+});
 
-export type Routes = z.infer<typeof Routes>;
+export type Route = z.infer<typeof Route>;
 
 export const SubwayGraph = z.object({
     nodes: z.array(z.object({
@@ -25,7 +25,7 @@ export const SubwayGraph = z.object({
         target: z.string(),
         weight: z.number(),
     })),
-    routes: Routes
+    routes: z.record(z.string(), Route)
 });
 export type SubwayGraph = z.infer<typeof SubwayGraph>;
 

@@ -144,8 +144,8 @@ async fn run_simulation(
         });
         route_id_map.push(route.id.clone());
     }
-    let simulator = Simulator::new(subway_map, routes);
-    let simulation_results = simulator.run(45);
+    let simulator = Simulator::new(subway_map, routes.clone());
+    let simulation_results = simulator.run(60);
     let train_positions: Vec<_> = simulation_results
         .train_positions
         .into_iter()
@@ -158,10 +158,13 @@ async fn run_simulation(
                     id: p.id.0,
                     curr_section: petgraph_map[&p.curr_section].clone(),
                     pos: p.pos,
+                    distance_travelled: p.distance_travelled,
                 })
                 .collect(),
         })
         .collect();
+    
+    let train_to_route = simulation_results.train_to_route.into_iter().map(|(train, route)| (train.0, route_id_map[route.0 as usize].clone())).collect();
 
     let station_statistics = simulation_results
         .station_statistics
@@ -193,6 +196,7 @@ async fn run_simulation(
 
     Ok(JsSimulationResults {
         train_positions,
+        train_to_route,
         station_statistics,
     })
 }
@@ -202,6 +206,7 @@ struct JsTrainPosition {
     pub id: u32,
     pub curr_section: String,
     pub pos: f64,
+    pub distance_travelled: f64,
 }
 
 #[derive(Serialize)]
@@ -228,6 +233,7 @@ struct JsArrivalStats {
 #[derive(Serialize)]
 struct JsSimulationResults {
     pub train_positions: Vec<JsTrainPositions>,
+    pub train_to_route: HashMap<u32, String>,
     pub station_statistics: HashMap<String, JsStationStatistic>,
 }
 
