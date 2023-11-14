@@ -84,7 +84,7 @@ pub struct SimulationResults {
 }
 
 const STATION_DWELL_TIME: f64 = 0.5;
-const MIN_TRAIN_DISTANCE: f64 = 1.0;
+const MIN_TRAIN_DISTANCE: f64 = 3.0;
 const TIME_STEP: f64 = 1.0;
 
 fn f64_min(a: f64, b: f64) -> f64 {
@@ -164,6 +164,45 @@ impl Simulator {
         }
     }
 
+    fn station_to_track(&mut self, station: StationId, mut time_left: f64) {
+        if let Some(train) = &self.stations[&station].train {
+            let train = *train;
+            let train_mut = self.trains.get_mut(&train).unwrap();
+            let distance_travelled = f64_max(STATION_DWELL_TIME - train_mut.pos, 0.0);
+            train_mut.pos += distance_travelled;
+            time_left -= distance_travelled;
+            let route_id = train_mut.route;
+            let next_track_id = self.routes[&route_id].station_to.get(&station);
+            let next_track_id = match next_track_id {
+                Some(next_track_id) => next_track_id,
+                None => {
+                    self.trains.remove(&train);
+                    self.stations.get_mut(&station).unwrap().train = None;
+                    return;
+                }
+            };
+            let next_track: &mut Track = self.tracks.get_mut(&next_track_id).unwrap();
+            let last_train = next_track.trains.back();
+            if let Some(last_train) = last_train {
+                let last_train_pos = self.trains[last_train].pos;
+                // only move the train off the station if there's space on the next track
+                if last_train_pos >= MIN_TRAIN_DISTANCE {
+                    self.stations.get_mut(&station).unwrap().train = None;
+                    next_track.trains.push_back(train);
+                    let pos_move = f64_min(time_left, last_train_pos - MIN_TRAIN_DISTANCE);
+                    let train_mut = self.trains.get_mut(&train).unwrap();
+                    train_mut.pos = pos_move;
+                    train_mut.curr_section = TrackStationId::Track(*next_track_id);
+                }
+            } else {
+                self.stations.get_mut(&station).unwrap().train = None;
+                train_mut.curr_section = TrackStationId::Track(*next_track_id);
+                self.trains.get_mut(&train).unwrap().pos = time_left;
+                next_track.trains.push_back(train);
+            }
+        }
+    }
+
     pub fn run(mut self, iterations: i32) -> SimulationResults {
         let traversal_order = self.traversal_order.clone();
         println!("{:?}", traversal_order);
@@ -179,53 +218,14 @@ impl Simulator {
             for track_station in &traversal_order {
                 match *track_station {
                     TrackStationId::Station(station) => {
-                        let mut time_left = TIME_STEP;
-                        if let Some(train) = &self.stations[&station].train {
-                            let train = *train;
-                            let train_mut = self.trains.get_mut(&train).unwrap();
-                            let distance_travelled =
-                                f64_max(STATION_DWELL_TIME - train_mut.pos, 0.0);
-                            train_mut.pos += distance_travelled;
-                            time_left -= distance_travelled;
-                            let route_id = train_mut.route;
-                            let next_track_id = self.routes[&route_id].station_to.get(&station);
-                            let next_track_id = match next_track_id {
-                                Some(next_track_id) => next_track_id,
-                                None => {
-                                    self.trains.remove(&train);
-                                    self.stations.get_mut(&station).unwrap().train = None;
-                                    continue;
-                                }
-                            };
-                            let next_track: &mut Track =
-                                self.tracks.get_mut(&next_track_id).unwrap();
-                            let last_train = next_track.trains.back();
-                            if let Some(last_train) = last_train {
-                                let last_train_pos = self.trains[last_train].pos;
-                                // only move the train off the station if there's space on the next track
-                                if last_train_pos >= MIN_TRAIN_DISTANCE {
-                                    self.stations.get_mut(&station).unwrap().train = None;
-                                    next_track.trains.push_back(train);
-                                    let pos_move =
-                                        f64_min(time_left, last_train_pos - MIN_TRAIN_DISTANCE);
-                                    let train_mut = self.trains.get_mut(&train).unwrap();
-                                    train_mut.pos = pos_move;
-                                    train_mut.curr_section = TrackStationId::Track(*next_track_id);
-                                }
-                            } else {
-                                self.stations.get_mut(&station).unwrap().train = None;
-                                train_mut.curr_section = TrackStationId::Track(*next_track_id);
-                                self.trains.get_mut(&train).unwrap().pos = time_left;
-                                next_track.trains.push_back(train);
-                            }
-                        }
+                        self.station_to_track(station, TIME_STEP);
                     }
                     TrackStationId::Track(track) => {
-                        let track_mut = self.tracks.get_mut(&track).unwrap();
                         let mut i = 0;
                         let mut last_train_pos = f64::INFINITY;
                         let next_station_id = self.subway_map.edge_endpoints(track).unwrap().1;
-                        while i < track_mut.trains.len() {
+                        while i < self.tracks.get_mut(&track).unwrap().trains.len() {
+                            let track_mut = self.tracks.get_mut(&track).unwrap();
                             if self.stations[&next_station_id].train.is_some() {
                                 last_train_pos =
                                     f64_max(track_mut.length as f64 - MIN_TRAIN_DISTANCE, 0.0);
@@ -234,7 +234,7 @@ impl Simulator {
                             let curr_train_mut = self.trains.get_mut(&curr_train_id).unwrap();
                             let mut time_left = TIME_STEP;
                             let travel_distance = f64_min(
-                                time_left,
+                                f64_min(time_left, f64_max(track_mut.length as f64 - curr_train_mut.pos, 0.0)),
                                 f64_max(
                                     if curr_train_mut.pos + MIN_TRAIN_DISTANCE >= last_train_pos {
                                         last_train_pos - MIN_TRAIN_DISTANCE - curr_train_mut.pos
@@ -268,10 +268,11 @@ impl Simulator {
                                         .or_default()
                                         .push(t as f64 + travel_distance);
                                 }
-
-                                curr_train_mut.pos = time_left;
+                                
                                 curr_train_mut.curr_section =
                                     TrackStationId::Station(next_station_id);
+                                
+                                self.station_to_track(next_station_id, time_left);
                                 // TODO: handle the fact that some station time may be wasted when the train could keep moving
                                 // potentially some of this spaghetti code needs to get factored out into
                                 // a separate function, tbd
@@ -285,7 +286,7 @@ impl Simulator {
             }
 
             // TODO: replace with actual scheduling data
-            if t % 3 == 0 {
+            if t % 6 == 0 {
                 for (id, route) in &self.routes {
                     let start_station_mut = self.stations.get_mut(&route.start_station).unwrap();
                     // TODO: do I need to handle the case where this is not true?

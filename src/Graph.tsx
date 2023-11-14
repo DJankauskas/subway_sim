@@ -3,7 +3,8 @@ import cytoscape, { Core, EdgeSingular, NodeSingular } from "cytoscape";
 import popper from "cytoscape-popper";
 cytoscape.use(popper);
 import tippy from "tippy.js";
-import { SubwayGraph } from "./subwayGraph";
+import { SubwayGraph, Routes } from "./subwayGraph";
+import { createRoot } from "react-dom/client";
 
 export type GraphMode = 'edit' | 'path_select' | 'route_edit' | 'display'
 
@@ -24,7 +25,7 @@ export interface SimulationResults {
 }
 
 interface StationStatistic {
-   arrival_times: Record<string, {min_wait: number, max_wait: number, average_wait: number}>, 
+    arrival_times: Record<string, { min_wait: number, max_wait: number, average_wait: number }>,
 }
 
 type GraphProps = {
@@ -47,7 +48,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
     const divRef = useRef(null);
     const [graph, setGraph] = useState<Core | undefined>();
     const [editType, setEditType] = useState<EditType>({ type: 'none' });
-    const [routes, setRoutes] = useState<SubwayGraph["routes"]>({});
+    const [routes, setRoutes] = useState<Routes>({});
     const [stationStatistics, setStationStatistics] = useState<Record<string, StationStatistic> | null>(null);
 
     useEffect(() => {
@@ -104,7 +105,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                     selected.unselect();
                     setRoutes({ ...routes, [route.id]: route });
                 }
-            } 
+            }
             if (event.key === 'r') {
                 // reset viewport settings
                 graph?.reset();
@@ -200,23 +201,25 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
             };
             const nodeClickHandler = (event: any) => {
                 const currentNode = event.target;
-                const statistic = stationStatistics?.[currentNode.id()].arrival_times;
+                const statistic = stationStatistics?.[currentNode.id()];
                 if (statistic) {
                     const ref = currentNode.popperRef();
                     const dummyEle = document.createElement('div');
+                    const content = document.createElement('div');
+                    const tooltipRoot = createRoot(content);
+                    content.style.backgroundColor = 'white';
+                    content.style.borderRadius = '5px';
+                    content.style.padding = '10px';
+                    content.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.1)';
                     const tip = tippy(dummyEle, {
                         getReferenceClientRect: ref.getBoundingClientRect,
                         trigger: 'manual',
                         content: () => {
-                            // TODO: replace with React rendering? 
-                            const content = document.createElement('div');
-                            let innerHTML = '';
-                            console.log(content);
-                            for (const [id, data] of Object.entries(statistic)) {
-                                innerHTML += `<h3>Route ${routes[id].name}</h3><p>Average wait: ${data.average_wait}</p><p>Min wait: ${data.min_wait}</p><p>Max wait: ${data.max_wait}</p>`;
-                            }
-                            content.innerHTML = innerHTML;
+                            tooltipRoot.render(<StationStatisticTooltip statistic={statistic} routes={routes} />)
                             return content;
+                        },
+                        onDestroy: () => {
+                            tooltipRoot.unmount();
                         }
                     });
                     tip.show();
@@ -419,4 +422,22 @@ function serializeGraph(graph: cytoscape.Core): any {
         nodes: graph.nodes().map(node => ({ id: node.id() })),
         edges: graph.edges().map(edge => ({ id: edge.id(), source: edge.source().id(), target: edge.target().id(), weight: edge.data().weight }))
     };
+}
+
+const StationStatisticTooltip = ({ statistic, routes }: { statistic: StationStatistic, routes: Routes }) => {
+    return (
+        <div>
+            {
+                Object.entries(statistic.arrival_times)
+                    .map(([id, data]) => (
+                        <div>
+                            <h4>{routes[id].name}</h4>
+                            <p>Average: {data.average_wait}</p>
+                            <p>Min: {data.min_wait}</p>
+                            <p>Max: {data.max_wait}</p>
+                        </div>)
+                    )
+            }
+        </div>
+    )
 }
