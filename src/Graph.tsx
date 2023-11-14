@@ -24,8 +24,15 @@ export interface SimulationResults {
     station_statistics: Record<string, StationStatistic>,
 }
 
+interface ArrivalTimes {
+    min_wait: number,
+    max_wait: number,
+    average_wait: number
+}
+
 interface StationStatistic {
-    arrival_times: Record<string, { min_wait: number, max_wait: number, average_wait: number }>,
+    arrival_times: Record<string, ArrivalTimes>,
+    overall_arrival_times?: ArrivalTimes
 }
 
 type GraphProps = {
@@ -209,7 +216,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                     const tooltipRoot = createRoot(content);
                     content.style.backgroundColor = 'white';
                     content.style.borderRadius = '5px';
-                    content.style.padding = '10px';
+                    content.style.padding = '2.5px';
                     content.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.1)';
                     const tip = tippy(dummyEle, {
                         getReferenceClientRect: ref.getBoundingClientRect,
@@ -431,12 +438,20 @@ const StationStatisticTooltip = ({ statistic, routes }: { statistic: StationStat
                 Object.entries(statistic.arrival_times)
                     .map(([id, data]) => (
                         <div>
-                            <h4>{routes[id].name}</h4>
-                            <p>Average: {data.average_wait}</p>
-                            <p>Min: {data.min_wait}</p>
-                            <p>Max: {data.max_wait}</p>
+                            <b>{routes[id].name}</b>
+                            <div>Average: {data.average_wait}</div>
+                            <div>Min: {data.min_wait}</div>
+                            <div>Max: {data.max_wait}</div>
                         </div>)
                     )
+            }
+            {statistic.overall_arrival_times ? (
+                <div>
+                    <b>Overall</b>
+                    <div>Average: {statistic.overall_arrival_times.average_wait}</div>
+                    <div>Min: {statistic.overall_arrival_times.min_wait}</div>
+                    <div>Max: {statistic.overall_arrival_times.max_wait}</div>
+                </div>) : null
             }
         </div>
     )

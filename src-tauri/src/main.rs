@@ -167,26 +167,25 @@ async fn run_simulation(
         .station_statistics
         .into_iter()
         .map(|(id, s)| {
-            (
-                petgraph_map[&TrackStationId::Station(id)].clone(),
-                JsStationStatistic {
-                    arrival_times: s.arrival_times.into_iter().map(|(r_id, data)| {
-                        let mut differences = Vec::with_capacity(data.len());
-                        let mut prev_time = data.first().copied().unwrap_or_default();
-                        for i in 1..data.len() {
-                            differences.push(data[i] - prev_time);
-                            prev_time = data[i];
-                        }
+            
+            let overall_arrival_times = (s.arrival_times.len() > 1).then(|| {
+                let mut data = Vec::new();
+                s.arrival_times.values().for_each(|arrival_time| data.extend(arrival_time));
+                data.sort_unstable_by(f64::total_cmp);
+                calculate_arrival_time_statistics(data)
+            });
+            let arrival_times = s.arrival_times.into_iter().map(|(r_id, data)| {
 
                         (
                             route_id_map[r_id.0 as usize].clone(),
-                            JsArrivalStats {
-                                min_wait: differences.iter().copied().min_by(f64::total_cmp).unwrap_or_default(),
-                                max_wait: differences.iter().copied().max_by(f64::total_cmp).unwrap_or_default(),
-                                average_wait: differences.iter().sum::<f64>() / differences.len() as f64,
-                            },
+                            calculate_arrival_time_statistics(data)
                         )
-                    }).collect(),
+                    }).collect();
+            (
+                petgraph_map[&TrackStationId::Station(id)].clone(),
+                JsStationStatistic {
+                    arrival_times,
+                    overall_arrival_times
                 },
             )
         })
@@ -214,6 +213,9 @@ struct JsTrainPositions {
 #[derive(Serialize)]
 struct JsStationStatistic {
     pub arrival_times: HashMap<String, JsArrivalStats>,
+    /// arrival times for all routes
+    /// None if there's only one route
+    pub overall_arrival_times: Option<JsArrivalStats>,
 }
 
 #[derive(Serialize)]
@@ -234,4 +236,18 @@ fn main() {
         .invoke_handler(tauri::generate_handler![shortest_path, run_simulation])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn calculate_arrival_time_statistics(data: Vec<f64>) -> JsArrivalStats {
+    let mut differences = Vec::with_capacity(data.len());
+    let mut prev_time = data.first().copied().unwrap_or_default();
+    for i in 1..data.len() {
+        differences.push(data[i] - prev_time);
+        prev_time = data[i];
+    }
+    JsArrivalStats {
+        min_wait: differences.iter().copied().min_by(f64::total_cmp).unwrap_or_default(),
+        max_wait: differences.iter().copied().max_by(f64::total_cmp).unwrap_or_default(),
+        average_wait: differences.iter().sum::<f64>() / differences.len() as f64,
+    }
 }
