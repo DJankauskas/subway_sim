@@ -3,7 +3,7 @@ import cytoscape, { Core, EdgeSingular, NodeSingular } from "cytoscape";
 import popper from "cytoscape-popper";
 cytoscape.use(popper);
 import tippy from "tippy.js";
-import { SubwayGraph, Route } from "./subwayGraph";
+import { SubwayGraph, Route, Routes } from "./subwayGraph";
 import { createRoot } from "react-dom/client";
 
 import { StringlineChart, Stringline, StringlinePoint, Station } from "./StringlineChart";
@@ -59,8 +59,11 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
     const divRef = useRef(null);
     const [graph, setGraph] = useState<Core | undefined>();
     const [editType, setEditType] = useState<EditType>({ type: 'none' });
-    const [routes, setRoutes] = useState<Record<string, Route>>({});
+    const [routes, setRoutes] = useState<Routes>({});
     const [simulationResults, setSimulationResults] = useState<SimulationResults | null>(null);
+    const [primaryStringlineRoute, setPrimaryStringlineRoute] = useState<string | undefined>(undefined);
+    const [secondaryStringlineRoute, setSecondaryStringlineRoute] = useState<string | undefined>(undefined);
+
 
     useEffect(() => {
         if (graph && getCurrentSubwayGraph) {
@@ -265,8 +268,6 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
             }
         }
     }, [mode]);
-    
-    const stringlineRoute = Object.keys(routes)[1];
 
     return (
         <>
@@ -278,7 +279,18 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                     setSimulationResults(results);
                 }
             }}>Simulate</button>
-            {simulationResults ? <StringlineChart stations={namedStationsOfRoute(routes[stringlineRoute], initialSubwayGraph)} stringlines={trainPositionsToStringlines(simulationResults.train_positions, simulationResults.train_to_route, 60, new Set([stringlineRoute]))} /> : null}
+            {simulationResults ?
+                (
+                    <>
+                        <StringlineDropdown route={primaryStringlineRoute} setRoute={setPrimaryStringlineRoute} routes={routes} />
+                        <StringlineDropdown route={secondaryStringlineRoute} setRoute={setSecondaryStringlineRoute} routes={routes} />
+                        <StringlineChart
+                            stations={primaryStringlineRoute ? namedStationsOfRoute(routes[primaryStringlineRoute], initialSubwayGraph) : []}
+                            stringlines={trainPositionsToStringlines(simulationResults.train_positions, simulationResults.train_to_route, 60, new Set(primaryStringlineRoute ? [primaryStringlineRoute, ...(secondaryStringlineRoute ? [secondaryStringlineRoute] : [])] : []))}
+                        />
+                    </>
+                )
+                : null}
             {editType.type === 'edgeWeight'
                 ? <GraphPropertyInput
                     type="number"
@@ -403,7 +415,7 @@ function setTrainPositions(graph: cytoscape.Core, trainPositions: TrainPositions
             y = sourcePos.y + (train.pos / element.data().weight) * (targetPos.y - sourcePos.y);
         } else {
             continue;
-        }         
+        }
         graph.add({
             group: 'nodes',
             data: { type: 'train', name: '' },
@@ -472,20 +484,20 @@ function trainPositionsToStringlines(positions: TrainPositions[], trainToRoute: 
             if (train.pos < 0) {
                 console.log("detected train with negative position!");
             }
-            trainPositions[train.id].push({x: position.time, y: train.pos + train.distance_travelled});
+            trainPositions[train.id].push({ x: position.time, y: train.pos + train.distance_travelled });
             train.curr_section
         }
     }
-    
+
     console.log(trainToRoute);
-    
+
     const stringlines: Record<string, Stringline[]> = {}
     for (const route of routes) {
         stringlines[route] = [];
     }
-    
+
     for (const [id, positions] of Object.entries(trainPositions)) {
-        const route = trainToRoute[id as any]; 
+        const route = trainToRoute[id as any];
         if (routes.has(route)) {
             stringlines[trainToRoute[id as any]].push(positions);
         }
@@ -498,4 +510,18 @@ function trainPositionsToStringlines(positions: TrainPositions[], trainToRoute: 
 function namedStationsOfRoute(route: Route, graph: SubwayGraph): Station[] {
     const stations: Station[] = [];
     return stations;
+}
+
+interface StringlineDropdownProps {
+    route?: string,
+    setRoute: (r: string) => void,
+    routes: Routes
+}
+
+const StringlineDropdown: React.FC<StringlineDropdownProps> = ({ route, setRoute, routes }) => {
+    return (
+        <select value={route} onChange={e => setRoute(e.currentTarget.value)}>
+            {Object.entries(routes).map(([key, value]) => <option key={key} value={key}>{value.name}</option>)}
+        </select>
+    )
 }

@@ -9,6 +9,9 @@ export const Route = z.object({
 
 export type Route = z.infer<typeof Route>;
 
+export const Routes = z.record(z.string(), Route);
+export type Routes = z.infer<typeof Routes>;
+
 export const SubwayGraph = z.object({
     nodes: z.array(z.object({
         id: z.string(),
@@ -25,7 +28,7 @@ export const SubwayGraph = z.object({
         target: z.string(),
         weight: z.number(),
     })),
-    routes: z.record(z.string(), Route)
+    routes: Routes
 });
 export type SubwayGraph = z.infer<typeof SubwayGraph>;
 

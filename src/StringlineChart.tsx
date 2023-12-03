@@ -24,10 +24,9 @@ interface TransitStringlineDiagramProps {
 export const StringlineChart: React.FC<TransitStringlineDiagramProps> = ({ stations, stringlines }) => {
     console.log(stations);
     console.log(stringlines);
-    /* TODO show second route as well */
     const primaryStringlines = stringlines[Object.keys(stringlines)[0] as any];
-    const data = {
-        datasets: primaryStringlines.map(stringline => ({
+    const secondaryStringlines = stringlines[Object.keys(stringlines)[1] as any];
+    const primaryDatasets = primaryStringlines?.map(stringline => ({
             label: 'Stringline',
             data: stringline,
             borderColor: 'blue',
@@ -35,7 +34,19 @@ export const StringlineChart: React.FC<TransitStringlineDiagramProps> = ({ stati
             showLine: true,
             fill: false,
             pointRadius: 0,
-        })),
+        }));
+    const secondaryDatasets = secondaryStringlines?.map(stringline => ({
+            label: 'Stringline',
+            data: stringline,
+            borderColor: 'red',
+            backgroundColor: 'red',
+            showLine: true,
+            fill: false,
+            pointRadius: 0,
+        }));
+    const datasets = [...(primaryDatasets || []), ...(secondaryDatasets || [])];
+    const data = {
+        datasets,
     };
 
     const options = {
