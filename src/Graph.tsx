@@ -372,11 +372,13 @@ function initializeGraph(core: Core, subwayGraph: SubwayGraph) {
 function graphToSubwayGraph(core: Core, routes: SubwayGraph["routes"]): SubwayGraph {
     const nodes = [];
     for (const node of core.nodes()) {
-        nodes.push({
-            id: node.id(),
-            name: node.data().name,
-            position: node.position(),
-        });
+        if (node.data().type !== 'train') {
+            nodes.push({
+                id: node.id(),
+                name: node.data().name,
+                position: node.position(),
+            });
+        }
     }
     const edges = [];
     for (const edge of core.edges()) {
