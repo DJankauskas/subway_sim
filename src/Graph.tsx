@@ -85,7 +85,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                         selected.remove()
                         break;
                     case 'n':
-                        graph.add({ data: { name: '' } })
+                        graph.add({ data: { name: '' }, position: currentCenter(graph) })
                         break;
                     case 'w':
                         if (selected.isEdge()) {
@@ -524,4 +524,21 @@ const StringlineDropdown: React.FC<StringlineDropdownProps> = ({ route, setRoute
             {Object.entries(routes).map(([key, value]) => <option key={key} value={key}>{value.name}</option>)}
         </select>
     )
+}
+
+function currentCenter(graph: cytoscape.Core): { x: number, y: number } {
+    // Get viewport size
+    const viewportWidth = graph.width();
+    const viewportHeight = graph.height();
+
+    // Get the current pan position
+    const pan = graph.pan();
+
+    // Get the current zoom level
+    const zoom = graph.zoom();
+
+    // Calculate the center coordinates in logical space
+    const x = (viewportWidth / 2 - pan.x) / zoom;
+    const y = (viewportHeight / 2 - pan.y) / zoom;
+    return { x, y };
 }
