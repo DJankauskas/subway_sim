@@ -20,8 +20,8 @@ async function shortestPath(graph: any, source: string, target: string): Promise
 }
 
 
-async function runSimulation(graph: any, routes: any): Promise<SimulationResults> {
-  const result = await invoke('run_simulation', {jsGraph: graph, jsRoutes: routes});
+async function runSimulation(graph: any, routes: any, frequency: number): Promise<SimulationResults> {
+  const result = await invoke('run_simulation', {jsGraph: graph, jsRoutes: routes, frequency});
   console.log(result);
   return result as any;
 }
@@ -35,7 +35,7 @@ function App() {
     setMode(event.currentTarget.value)
   }, []);
   return (
-    <div>
+    <div style={{display: 'flex', flexDirection: 'column'}}>
     <h1>Shortest Path</h1>
       <Graph mode={mode} initialSubwayGraph={initialSubwayGraph} onSimulate={runSimulation} onShortestPath={shortestPath} getCurrentSubwayGraph={getSubwayGraph} />
       <div>

@@ -208,7 +208,7 @@ impl Simulator {
         }
     }
 
-    pub fn run(mut self, iterations: i32) -> SimulationResults {
+    pub fn run(mut self, iterations: i32, frequency: u64) -> SimulationResults {
         let mut train_to_route = HashMap::new();
         let traversal_order = self.traversal_order.clone();
         println!("{:?}", traversal_order);
@@ -218,7 +218,7 @@ impl Simulator {
 
         let mut train_positions = Vec::new();
 
-        let mut t = -60;
+        let mut t = -120;
 
         while t < iterations {
             for track_station in &traversal_order {
@@ -253,7 +253,7 @@ impl Simulator {
                             curr_train_mut.pos += travel_distance;
                             time_left -= travel_distance;
                             // we're done with the current track, and need to move into the station
-                            if curr_train_mut.pos >= track_mut.length as f64 {
+                            if curr_train_mut.pos >= track_mut.length as f64 && self.stations[&next_station_id].train.is_none() {
                                 debug_assert_eq!(i, 0);
                                 track_mut.trains.pop_front();
                                 debug_assert!(
@@ -295,7 +295,7 @@ impl Simulator {
             }
 
             // TODO: replace with actual scheduling data
-            if t % 4 == 0 {
+            if t % (frequency as i32) == 0 {
                 for (id, route) in &self.routes {
                     let start_station_mut = self.stations.get_mut(&route.start_station).unwrap();
                     // TODO: do I need to handle the case where this is not true?

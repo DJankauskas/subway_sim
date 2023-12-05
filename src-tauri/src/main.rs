@@ -104,6 +104,7 @@ fn shortest_path(js_graph: JsGraph, source: &str, target: &str) -> Option<Shorte
 async fn run_simulation(
     js_graph: JsGraph,
     js_routes: JsRoutes,
+    frequency: u64
 ) -> Result<JsSimulationResults, String> {
     eprintln!("start running simulation");
     let mut routes = Vec::with_capacity(js_routes.len());
@@ -145,7 +146,7 @@ async fn run_simulation(
         route_id_map.push(route.id.clone());
     }
     let simulator = Simulator::new(subway_map, routes.clone());
-    let simulation_results = simulator.run(60);
+    let simulation_results = simulator.run(60, frequency);
     let train_positions: Vec<_> = simulation_results
         .train_positions
         .into_iter()

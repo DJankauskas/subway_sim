@@ -43,7 +43,7 @@ type GraphProps = {
     initialSubwayGraph: SubwayGraph,
     mode: GraphMode,
     onShortestPath: (graph: any, source: string, target: string) => void,
-    onSimulate: (graph: any, routes: any) => Promise<SimulationResults>,
+    onSimulate: (graph: any, routes: any, frequency: number) => Promise<SimulationResults>,
     getCurrentSubwayGraph?: MutableRefObject<() => SubwayGraph>,
 }
 
@@ -60,6 +60,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
     const [graph, setGraph] = useState<Core | undefined>();
     const [editType, setEditType] = useState<EditType>({ type: 'none' });
     const [routes, setRoutes] = useState<Routes>({});
+    const [frequency, setFrequency] = useState("4");
     const [simulationResults, setSimulationResults] = useState<SimulationResults | null>(null);
     const [primaryStringlineRoute, setPrimaryStringlineRoute] = useState<string | undefined>(undefined);
     const [secondaryStringlineRoute, setSecondaryStringlineRoute] = useState<string | undefined>(undefined);
@@ -270,15 +271,16 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
     }, [mode]);
 
     return (
-        <>
+        <div>
             <div ref={divRef} style={{ width: 800, height: 400 }}></div>
             <button onClick={async () => {
                 if (graph) {
-                    const results = await onSimulate(serializeGraph(graph), routes);
+                    const results = await onSimulate(serializeGraph(graph), routes, parseInt(frequency) || 4);
                     renderTrainPositions(graph, results.train_positions);
                     setSimulationResults(results);
                 }
             }}>Simulate</button>
+            <input type="number" pattern="[0-9]*" placeholder="Frequency" value={frequency} onChange={e => setFrequency(e.currentTarget.value)} />
             {simulationResults ?
                 (
                     <>
@@ -322,7 +324,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                     y={editType.renderedY}
                 />
                 : null}
-        </>
+        </div>
     )
 }
 
@@ -518,13 +520,14 @@ function namedStationsOfRoute(route: Route, graph: SubwayGraph): Station[] {
 
 interface StringlineDropdownProps {
     route?: string,
-    setRoute: (r: string) => void,
+    setRoute: (r: string | undefined) => void,
     routes: Routes
 }
 
 const StringlineDropdown: React.FC<StringlineDropdownProps> = ({ route, setRoute, routes }) => {
     return (
         <select value={route} onChange={e => setRoute(e.currentTarget.value)}>
+            <option key="none">None</option>
             {Object.entries(routes).map(([key, value]) => <option key={key} value={key}>{value.name}</option>)}
         </select>
     )
