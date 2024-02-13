@@ -53,7 +53,7 @@ function App() {
         </div>
         <div>
           <input type="radio" value="route_edit" checked={mode === "route_edit"} onChange={handleMode} />
-          <label htmlFor="route_edit">Route creation</label>
+          <label htmlFor="route_edit">Route editing</label>
         </div>
       </div>
       <div>

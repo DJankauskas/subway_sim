@@ -65,14 +65,18 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
     const [simulationResults, setSimulationResults] = useState<SimulationResults | null>(null);
     const [primaryStringlineRoute, setPrimaryStringlineRoute] = useState<string | undefined>(undefined);
     const [secondaryStringlineRoute, setSecondaryStringlineRoute] = useState<string | undefined>(undefined);
+    const [routeToEdit, setRouteToEdit] = useState("");
+    const [newRouteName, setNewRouteName] = useState("")
 
 
+    // Update upstream graph with current graph state
     useEffect(() => {
         if (graph && getCurrentSubwayGraph) {
             getCurrentSubwayGraph.current = () => graphToSubwayGraph(graph, routes);
         }
     }, [graph, getCurrentSubwayGraph, routes]);
 
+    // Handle keyboard events
     useEffect(() => {
         const keydownHandler = (event: KeyboardEvent) => {
             console.log('Responding to key', event.key);
@@ -108,18 +112,17 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                 }
             } else if (mode === 'route_edit') {
                 if (event.key === 'Enter') {
-                    console.log('Enter pressed!')
                     const selected = graph!.$(':selected');
-                    const route = {
-                        name: 'TODO',
-                        id: (Math.floor(Math.random() * 2 ** 50)).toString(),
-                        nodes: [] as string[],
-                        edges: [] as string[],
-                    }
-                    selected.filter('node').forEach(node => { route.nodes.push(node.id()) });
-                    selected.filter('edge').forEach(edge => { route.edges.push(edge.id()) });
+                    const route = routes[routeToEdit];
+
+                    const nodes: string[] = [];
+                    const edges: string[] = [];
+
+                    selected.filter('node').forEach(node => { nodes.push(node.id()) });
+                    selected.filter('edge').forEach(edge => { edges.push(edge.id()) });
                     selected.unselect();
-                    setRoutes({ ...routes, [route.id]: route });
+
+                    setRoutes({ ...routes, [route.id]: {...route, nodes, edges} });
                 }
             }
             if (event.key === 'r') {
@@ -133,6 +136,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
         };
     }, [graph, mode, editType])
 
+    // Set up graph styles on component initialization
     useEffect(() => {
         if (divRef.current) {
             const graph = cytoscape({
@@ -174,6 +178,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
         }
     }, [divRef.current])
 
+    // On graph change, re-initialize the cytoscape graph with new data
     useEffect(() => {
         if (graph && initialSubwayGraph) {
             initializeGraph(graph, initialSubwayGraph);
@@ -183,6 +188,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
         return () => { graph?.elements().remove(); }
     }, [graph, initialSubwayGraph])
 
+    // Handle node and edge clicks and double clicks
     useEffect(() => {
         if (graph) {
             const selectHandler = () => {
@@ -261,6 +267,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
         }
     }, [mode, routes, editType, simulationResults, onShortestPath])
 
+    // Update select type on mode change
     useEffect(() => {
         if (graph) {
             if (mode === 'path_select' || mode === 'route_edit') {
@@ -276,9 +283,9 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
             <div ref={divRef} style={{ width: 800, height: 400 }}></div>
             <button onClick={async () => {
                 if (graph) {
-                    const routesWithOffsets = {} as Record<string, Route & {offset: number}>;
+                    const routesWithOffsets = {} as Record<string, Route & { offset: number }>;
                     for (const [id, route] of Object.entries(routes)) {
-                        routesWithOffsets[id] = {...route, offset: routeOffsets[id] || 0};
+                        routesWithOffsets[id] = { ...route, offset: routeOffsets[id] || 0 };
                     }
                     const results = await onSimulate(serializeGraph(graph), routesWithOffsets, parseInt(frequency) || 4);
                     renderTrainPositions(graph, results.train_positions);
@@ -286,14 +293,14 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                 }
             }}>Simulate</button>
             <input type="number" pattern="[0-9]*" placeholder="Frequency" value={frequency} onChange={e => setFrequency(e.currentTarget.value)} />
-            <div>
-                {Object.entries(routes).map(([key, data]) => <div key={key}><div>{data.name}</div><input placeholder="Offset" type="number" pattern="[0-9]*" value={routeOffsets[key] || ""} onChange={e => setRouteOffsets({...routeOffsets, [key]: parseInt(e.currentTarget.value)})} /></div>)}
+            <div hidden>
+                {Object.entries(routes).map(([key, data]) => <div key={key}><div>{data.name}</div><input placeholder="Offset" type="number" pattern="[0-9]*" value={routeOffsets[key] || ""} onChange={e => setRouteOffsets({ ...routeOffsets, [key]: parseInt(e.currentTarget.value) })} /></div>)}
             </div>
             {simulationResults ?
                 (
                     <>
-                        <StringlineDropdown route={primaryStringlineRoute} setRoute={setPrimaryStringlineRoute} routes={routes} />
-                        <StringlineDropdown route={secondaryStringlineRoute} setRoute={setSecondaryStringlineRoute} routes={routes} />
+                        <RouteSelector route={primaryStringlineRoute} setRoute={setPrimaryStringlineRoute} routes={routes} />
+                        <RouteSelector route={secondaryStringlineRoute} setRoute={setSecondaryStringlineRoute} routes={routes} />
                         <StringlineChart
                             stations={primaryStringlineRoute ? namedStationsOfRoute(routes[primaryStringlineRoute], initialSubwayGraph) : []}
                             stringlines={trainPositionsToStringlines(simulationResults.train_positions, simulationResults.train_to_route, 60, new Set(primaryStringlineRoute ? [primaryStringlineRoute, ...(secondaryStringlineRoute ? [secondaryStringlineRoute] : [])] : []))}
@@ -332,6 +339,28 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                     y={editType.renderedY}
                 />
                 : null}
+            {mode == 'route_edit' ? <>
+                <RouteSelector routes={routes} route={routeToEdit} setRoute={(route) => {
+                    setRouteToEdit(route);
+                    graph?.$(':selected').unselect();
+                    console.log(`selected ${route} with data ${JSON.stringify(routes[route])}`)
+                    for (const node of routes[route].nodes) {
+                        graph?.getElementById(node).select();
+                    }
+                    for (const edge of routes[route].edges) {
+                        graph?.getElementById(edge).select();
+                    }
+                }
+                } requireSelection />
+                <div>
+                    <input type="text" value={newRouteName} onChange={e => setNewRouteName(e.currentTarget.value)}></input>
+                    <button onClick={() => {
+                        const id = (Math.floor(Math.random() * 2 ** 50)).toString();
+                        setRoutes({ ...routes, [id]: { name: newRouteName, id, nodes: [], edges: [] } });
+                        setNewRouteName("");
+                    }}>Create route</button>
+                </div>
+            </> : null}
         </div>
     )
 }
@@ -526,16 +555,22 @@ function namedStationsOfRoute(route: Route, graph: SubwayGraph): Station[] {
     return stations;
 }
 
-interface StringlineDropdownProps {
-    route?: string,
+type RouteSelectorProps = {
+    route: string,
+    setRoute: (r: string) => void,
+    routes: Routes,
+    requireSelection: true,
+} | {
+    route: string | undefined,
     setRoute: (r: string | undefined) => void,
-    routes: Routes
+    routes: Routes,
+    requireSelection?: false
 }
 
-const StringlineDropdown: React.FC<StringlineDropdownProps> = ({ route, setRoute, routes }) => {
+const RouteSelector: React.FC<RouteSelectorProps> = ({ route, setRoute, routes, requireSelection }) => {
     return (
         <select value={route} onChange={e => setRoute(e.currentTarget.value)}>
-            <option key="none">None</option>
+            {requireSelection ? null : <option key="none">None</option>}
             {Object.entries(routes).map(([key, value]) => <option key={key} value={key}>{value.name}</option>)}
         </select>
     )
