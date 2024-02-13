@@ -31,6 +31,7 @@ struct JsRoute {
     id: String,
     nodes: Vec<String>,
     edges: Vec<String>,
+    offset: u64,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -142,6 +143,7 @@ async fn run_simulation(
         routes.push(Route {
             start_station: start_station.expect("a station in the route with no incoming edges"),
             station_to,
+            offset: route.offset,
         });
         route_id_map.push(route.id.clone());
     }

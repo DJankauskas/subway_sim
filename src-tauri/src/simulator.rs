@@ -52,6 +52,7 @@ pub struct RouteId(pub u32);
 pub struct Route {
     pub start_station: StationId,
     pub station_to: HashMap<StationId, TrackId>,
+    pub offset: u64,
 }
 
 #[derive(Debug)]
@@ -240,7 +241,10 @@ impl Simulator {
                             let curr_train_mut = self.trains.get_mut(&curr_train_id).unwrap();
                             let mut time_left = TIME_STEP;
                             let travel_distance = f64_min(
-                                f64_min(time_left, f64_max(track_mut.length as f64 - curr_train_mut.pos, 0.0)),
+                                f64_min(
+                                    time_left,
+                                    f64_max(track_mut.length as f64 - curr_train_mut.pos, 0.0),
+                                ),
                                 f64_max(
                                     if curr_train_mut.pos + MIN_TRAIN_DISTANCE >= last_train_pos {
                                         last_train_pos - MIN_TRAIN_DISTANCE - curr_train_mut.pos
@@ -253,7 +257,9 @@ impl Simulator {
                             curr_train_mut.pos += travel_distance;
                             time_left -= travel_distance;
                             // we're done with the current track, and need to move into the station
-                            if curr_train_mut.pos >= track_mut.length as f64 && self.stations[&next_station_id].train.is_none() {
+                            if curr_train_mut.pos >= track_mut.length as f64
+                                && self.stations[&next_station_id].train.is_none()
+                            {
                                 debug_assert_eq!(i, 0);
                                 track_mut.trains.pop_front();
                                 debug_assert!(
@@ -274,13 +280,14 @@ impl Simulator {
                                         .or_default()
                                         .push(t as f64 + travel_distance);
                                 }
-                                
-                                curr_train_mut.distance_travelled += self.tracks[&track].length as f64;
-                                
+
+                                curr_train_mut.distance_travelled +=
+                                    self.tracks[&track].length as f64;
+
                                 curr_train_mut.curr_section =
                                     TrackStationId::Station(next_station_id);
                                 curr_train_mut.pos = 0.0;
-                                
+
                                 self.station_to_track(next_station_id, time_left);
                                 // TODO: handle the fact that some station time may be wasted when the train could keep moving
                                 // potentially some of this spaghetti code needs to get factored out into
@@ -295,31 +302,32 @@ impl Simulator {
             }
 
             // TODO: replace with actual scheduling data
-            if t % (frequency as i32) == 0 {
-                for (id, route) in &self.routes {
-                    let start_station_mut = self.stations.get_mut(&route.start_station).unwrap();
-                    // TODO: do I need to handle the case where this is not true?
-                    if start_station_mut.train.is_none() {
-                        let train = Train {
-                            id: self.curr_train_id,
-                            curr_section: TrackStationId::Station(start_station_mut.id),
-                            pos: 0.0,
-                            distance_travelled: 0.0,
-                            route: *id,
-                        };
+            for (id, route) in &self.routes {
+                if (t - route.offset as i32) % (frequency as i32) != 0 {
+                    continue;
+                }
+                let start_station_mut = self.stations.get_mut(&route.start_station).unwrap();
+                // TODO: do I need to handle the case where this is not true?
+                if start_station_mut.train.is_none() {
+                    let train = Train {
+                        id: self.curr_train_id,
+                        curr_section: TrackStationId::Station(start_station_mut.id),
+                        pos: 0.0,
+                        distance_travelled: 0.0,
+                        route: *id,
+                    };
 
-                        start_station_mut.train = Some(self.curr_train_id);
-                        if t >= 0 {
-                            start_station_mut
-                                .arrival_times
-                                .entry(*id)
-                                .or_default()
-                                .push(t as f64);
-                        }
-                        self.trains.insert(self.curr_train_id, train);
-                        train_to_route.insert(self.curr_train_id, *id);
-                        self.curr_train_id = TrainId(self.curr_train_id.0 + 1);
+                    start_station_mut.train = Some(self.curr_train_id);
+                    if t >= 0 {
+                        start_station_mut
+                            .arrival_times
+                            .entry(*id)
+                            .or_default()
+                            .push(t as f64);
                     }
+                    self.trains.insert(self.curr_train_id, train);
+                    train_to_route.insert(self.curr_train_id, *id);
+                    self.curr_train_id = TrainId(self.curr_train_id.0 + 1);
                 }
             }
 

@@ -60,6 +60,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
     const [graph, setGraph] = useState<Core | undefined>();
     const [editType, setEditType] = useState<EditType>({ type: 'none' });
     const [routes, setRoutes] = useState<Routes>({});
+    const [routeOffsets, setRouteOffsets] = useState<Record<string, number>>({});
     const [frequency, setFrequency] = useState("4");
     const [simulationResults, setSimulationResults] = useState<SimulationResults | null>(null);
     const [primaryStringlineRoute, setPrimaryStringlineRoute] = useState<string | undefined>(undefined);
@@ -275,12 +276,19 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
             <div ref={divRef} style={{ width: 800, height: 400 }}></div>
             <button onClick={async () => {
                 if (graph) {
-                    const results = await onSimulate(serializeGraph(graph), routes, parseInt(frequency) || 4);
+                    const routesWithOffsets = {} as Record<string, Route & {offset: number}>;
+                    for (const [id, route] of Object.entries(routes)) {
+                        routesWithOffsets[id] = {...route, offset: routeOffsets[id] || 0};
+                    }
+                    const results = await onSimulate(serializeGraph(graph), routesWithOffsets, parseInt(frequency) || 4);
                     renderTrainPositions(graph, results.train_positions);
                     setSimulationResults(results);
                 }
             }}>Simulate</button>
             <input type="number" pattern="[0-9]*" placeholder="Frequency" value={frequency} onChange={e => setFrequency(e.currentTarget.value)} />
+            <div>
+                {Object.entries(routes).map(([key, data]) => <div key={key}><div>{data.name}</div><input placeholder="Offset" type="number" pattern="[0-9]*" value={routeOffsets[key] || ""} onChange={e => setRouteOffsets({...routeOffsets, [key]: parseInt(e.currentTarget.value)})} /></div>)}
+            </div>
             {simulationResults ?
                 (
                     <>
