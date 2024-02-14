@@ -488,7 +488,7 @@ function renderTrainPositions(graph: cytoscape.Core, trainPositions: TrainPositi
 function serializeGraph(graph: cytoscape.Core): any {
     return {
         nodes: graph.nodes().map(node => ({ id: node.id() })),
-        edges: graph.edges().map(edge => ({ id: edge.id(), source: edge.source().id(), target: edge.target().id(), weight: edge.data().weight }))
+        edges: graph.edges().map(edge => ({ id: edge.id(), source: edge.source().id(), target: edge.target().id(), weight: edge.data().weight, type: edge.data().type }))
     };
 }
 

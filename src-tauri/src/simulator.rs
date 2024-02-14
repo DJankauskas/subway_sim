@@ -6,7 +6,9 @@ use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use petgraph::Graph;
 
-pub type SubwayMap = Graph<String, u16>;
+use crate::Edge;
+
+pub type SubwayMap = Graph<String, Edge>;
 pub type StationId = NodeIndex<u32>;
 pub type TrackId = EdgeIndex;
 
@@ -121,7 +123,7 @@ impl Simulator {
                 edge.id(),
                 Track {
                     id: edge.id(),
-                    length: *edge.weight(),
+                    length: edge.weight().weight,
                     trains: VecDeque::new(),
                 },
             );

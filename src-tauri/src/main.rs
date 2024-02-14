@@ -6,7 +6,6 @@ use simulator::{Route, Simulator, SubwayMap, TrackStationId};
 
 use std::collections::{HashMap, HashSet};
 
-use petgraph::algo::astar;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use petgraph::{Direction, Graph};
@@ -22,6 +21,33 @@ struct JsEdge {
     id: String,
     source: String,
     target: String,
+    weight: u16,
+    #[serde(alias = "type")]
+    r#type: String,
+}
+
+impl JsEdge {
+    fn to_edge(&self) -> Edge {
+        Edge {
+            ty: match &*self.r#type {
+                "track" => EdgeType::Track,
+                "walk" => EdgeType::Walk,
+                _ => panic!("illegal walk type encountered"),
+            },
+            weight: self.weight,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+enum EdgeType {
+    Track,
+    Walk,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct Edge {
+    ty: EdgeType,
     weight: u16,
 }
 
@@ -68,7 +94,7 @@ fn js_graph_to_subway_map(
         let edge_id = graph.add_edge(
             *cytoscape_map.get(&edge.source).unwrap(),
             *cytoscape_map.get(&edge.target).unwrap(),
-            edge.weight,
+            edge.to_edge(),
         );
         petgraph_map.insert(TrackStationId::Track(edge_id), edge.id.clone());
     }
@@ -78,6 +104,7 @@ fn js_graph_to_subway_map(
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 #[tauri::command]
 fn shortest_path(js_graph: JsGraph, source: &str, target: &str) -> Option<ShortestPath> {
+    /* 
     let (graph, map, _) = js_graph_to_subway_map(js_graph);
 
     let end = *map.get(target).unwrap();
@@ -99,6 +126,8 @@ fn shortest_path(js_graph: JsGraph, source: &str, target: &str) -> Option<Shorte
         length,
         path: result,
     })
+    */
+    None
 }
 
 #[tauri::command]
@@ -124,10 +153,9 @@ async fn run_simulation(
         let mut start_station = None;
 
         for node in &node_ids {
-            if subway_map
+            if !subway_map
                 .edges_directed(*node, Direction::Incoming)
-                .next()
-                .is_none()
+                .any(|edge| edge.weight().ty == EdgeType::Track)
             {
                 start_station = Some(*node);
             }
