@@ -146,19 +146,11 @@ async fn run_simulation(
         let mut station_to = HashMap::with_capacity(route.nodes.len());
         let node_ids: HashSet<_> = route
             .nodes
-            .into_iter()
-            .map(|id| cytoscape_id_map[&id])
+            .iter()
+            .map(|id| cytoscape_id_map[id])
             .collect();
 
-        let mut start_station = None;
-
         for node in &node_ids {
-            if !subway_map
-                .edges_directed(*node, Direction::Incoming)
-                .any(|edge| edge.weight().ty == EdgeType::Track)
-            {
-                start_station = Some(*node);
-            }
             for neighbor_edge in subway_map.edges_directed(*node, Direction::Outgoing) {
                 if node_ids.contains(&neighbor_edge.target()) {
                     station_to.insert(*node, neighbor_edge.id());
@@ -169,7 +161,7 @@ async fn run_simulation(
 
         // TODO: is this restriction overly limiting?
         routes.push(Route {
-            start_station: start_station.expect("a station in the route with no incoming edges"),
+            start_station: cytoscape_id_map[&route.nodes[0]],
             station_to,
             offset: route.offset,
         });

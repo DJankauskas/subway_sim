@@ -79,7 +79,6 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
     // Handle keyboard events
     useEffect(() => {
         const keydownHandler = (event: KeyboardEvent) => {
-            console.log('Responding to key', event.key);
             if (graph && mode === 'edit') {
                 const selected =
                     graph.$(':selected')[0];
@@ -115,14 +114,54 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                     const selected = graph!.$(':selected');
                     const route = routes[routeToEdit];
 
-                    const nodes: string[] = [];
-                    const edges: string[] = [];
+                    const nodes = new Set<string>();
+                    const edges = new Set<string>();
 
-                    selected.filter('node').forEach(node => { nodes.push(node.id()) });
-                    selected.filter('edge').forEach(edge => { edges.push(edge.id()) });
+                    selected.filter('node').forEach(node => { nodes.add(node.id()) });
+                    selected.filter('edge').forEach(edge => { edges.add(edge.id()) });
+                    
+                    // find the node that is not pointed to by any edge; it should be the first
+                    const destinationNodes = new Set();
+                    for (const edge of edges) {
+                        destinationNodes.add(graph?.$id(edge).target().id());
+                    }
+                    
+                    const nodesDifference = new Set<string>();
+
+                    for (const node of nodes) {
+                        if (!destinationNodes.has(node)) {
+                            nodesDifference.add(node);
+                        }
+                    }
+                    
+                    if (nodesDifference.size != 1) {
+                        // TODO better message and abort route edit
+                        alert("Creating a route with dangling nodes or that is cyclic");
+                    }
+                    
+                    const nodesSorted = [];
+                    const edgesSorted = [];
+                    
+                    let currNode = Array.from(nodesDifference)[0] as string | undefined;
+                    while (currNode) {
+                        nodesSorted.push(currNode);
+                        const edge = graph?.$id(currNode).connectedEdges(`edge[type = "track"][source = "${currNode}"]`).filter(edge => edges.has(edge.id()))[0];
+                        if (edge) {
+                            edgesSorted.push(edge.id());
+                            currNode = edge.target().id();
+                        } else {
+                            currNode = undefined;
+                        }
+                    }
+
+                    if (nodesSorted.length != nodes.size || edgesSorted.length != edges.size) {
+                        // TODO better message and abort route edit
+                        alert(`oops: bug in the sorting code ${nodesSorted.length} ${nodes.size} ${edgesSorted.length} ${edges.size}`);
+                    }
+
                     selected.unselect();
 
-                    setRoutes({ ...routes, [route.id]: {...route, nodes, edges} });
+                    setRoutes({ ...routes, [route.id]: {...route, nodes: nodesSorted, edges: edgesSorted} });
                 }
             }
             if (event.key === 'r') {
@@ -204,8 +243,6 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                     if (selected.length === 2) {
                         const g =
                             serializeGraph(graph);
-                        console.log(g)
-                        console.log(selected[0].id(), selected[1].id)
                         onShortestPath(
                             g,
                             selected[0].id(),
@@ -531,8 +568,6 @@ function trainPositionsToStringlines(positions: TrainPositions[], trainToRoute: 
             train.curr_section
         }
     }
-
-    console.log(trainToRoute);
 
     const stringlines: Record<string, Stringline[]> = {}
     for (const route of routes) {
