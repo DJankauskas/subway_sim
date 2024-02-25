@@ -132,7 +132,7 @@ impl Simulator {
         let terminal_nodes = terminal_nodes(&subway_map);
         let mut queue: VecDeque<TrackStationId> = terminal_nodes
             .into_iter()
-            .map(|n| TrackStationId::Station(n))
+            .map(TrackStationId::Station)
             .collect();
         let mut traversal_order: Vec<TrackStationId> = Vec::new();
         let mut visited = HashSet::new();
@@ -142,7 +142,7 @@ impl Simulator {
                 continue;
             };
             visited.insert(track_station);
-            traversal_order.push(track_station.clone());
+            traversal_order.push(track_station);
             match track_station {
                 TrackStationId::Track(track) => {
                     let (source, _) = subway_map.edge_endpoints(track).unwrap();
@@ -188,7 +188,7 @@ impl Simulator {
                     return;
                 }
             };
-            let next_track: &mut Track = self.tracks.get_mut(&next_track_id).unwrap();
+            let next_track: &mut Track = self.tracks.get_mut(next_track_id).unwrap();
             let last_train = next_track.trains.back();
             if let Some(last_train) = last_train {
                 let last_train_pos = self.trains[last_train].pos;
@@ -215,7 +215,7 @@ impl Simulator {
         let mut train_to_route = HashMap::new();
         let traversal_order = self.traversal_order.clone();
         println!("{:?}", traversal_order);
-        for (_, route) in &self.routes {
+        for route in self.routes.values() {
             println!("{:?}", route.start_station);
         }
 

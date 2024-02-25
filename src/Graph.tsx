@@ -560,7 +560,6 @@ function trainPositionsToStringlines(positions: TrainPositions[], trainToRoute: 
     for (const position of positions) {
         if (position.time > to) break;
         for (const train of position.trains) {
-            const positions = trainPositions[train.id] ||= [];
             if (train.pos < 0) {
                 console.log("detected train with negative position!");
             }

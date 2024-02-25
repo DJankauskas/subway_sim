@@ -46,7 +46,7 @@ enum EdgeType {
 }
 
 #[derive(Debug, Copy, Clone)]
-struct Edge {
+pub struct Edge {
     ty: EdgeType,
     weight: u16,
 }
@@ -101,9 +101,8 @@ fn js_graph_to_subway_map(
     (graph, cytoscape_map, petgraph_map)
 }
 
-// Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
-#[tauri::command]
-fn shortest_path(js_graph: JsGraph, source: &str, target: &str) -> Option<ShortestPath> {
+#[allow(unused)]
+fn shortest_path() -> Option<ShortestPath> {
     /* 
     let (graph, map, _) = js_graph_to_subway_map(js_graph);
 
@@ -262,7 +261,7 @@ struct JsSimulationResults {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![shortest_path, run_simulation])
+        .invoke_handler(tauri::generate_handler![run_simulation])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -270,9 +269,9 @@ fn main() {
 fn calculate_arrival_time_statistics(data: Vec<f64>) -> JsArrivalStats {
     let mut differences = Vec::with_capacity(data.len());
     let mut prev_time = data.first().copied().unwrap_or_default();
-    for i in 1..data.len() {
-        differences.push(data[i] - prev_time);
-        prev_time = data[i];
+    for item in data.iter().skip(1) {
+        differences.push(*item - prev_time);
+        prev_time = *item;
     }
     JsArrivalStats {
         min_wait: differences.iter().copied().min_by(f64::total_cmp).unwrap_or_default(),
