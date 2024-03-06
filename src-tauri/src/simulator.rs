@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 
@@ -6,7 +7,8 @@ use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use petgraph::Graph;
 
-use crate::Edge;
+use crate::shortest_path::{dijkstra, Terminated};
+use crate::{Edge, EdgeType};
 
 pub type SubwayMap = Graph<String, Edge>;
 pub type StationId = NodeIndex<u32>;
@@ -52,6 +54,7 @@ pub struct RouteId(pub u32);
 
 #[derive(Debug, Clone)]
 pub struct Route {
+    pub name: String,
     pub start_station: StationId,
     pub station_to: HashMap<StationId, TrackId>,
     pub offset: u64,
@@ -380,4 +383,290 @@ fn terminal_nodes(graph: &SubwayMap) -> Vec<NodeIndex> {
         .node_indices()
         .filter(|&node| graph.neighbors_directed(node, Direction::Outgoing).count() == 0)
         .collect()
+}
+
+struct Trip {
+    start: NodeIndex,
+    end: NodeIndex,
+    count: usize,
+}
+
+// All desired trips at a given time. TODO is this the nicest data layout? 
+type TripData = HashMap<i64, Vec<Trip>>;
+// A map from route ids to scheduled times for the trains to depart
+type Schedule = HashMap<String, Vec<i64>>;
+
+const SCHEDULE_GRANULARITY: i64 = 30;
+const SCHEDULE_PERIOD: i64 = 240;
+
+
+fn optimize(subway_map: SubwayMap, routes: HashMap<String, Route>, trip_data: &TripData) -> Schedule {
+    let mut frequencies: Vec<HashMap<String, Cell<i64>>> = Vec::with_capacity((SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) as usize);
+    // blacklisted time + route combos that should no longer be considered because they make performance worse
+    let mut blacklisted_fragments = HashSet::new();
+    
+    let mut curr_cost = f64::INFINITY;
+    let mut curr_schedule = Schedule::new();
+    
+    let mut search_map = generate_shortest_path_search_map(&subway_map, &routes);
+    
+    loop {
+        let mut best_fragment = None;
+        let mut lowest_cost = f32::INFINITY;
+        
+        for (time, route_frequencies) in frequencies.iter().enumerate() {
+            for (id, frequency) in route_frequencies.iter() {
+                if blacklisted_fragments.contains(&(time, id.clone())) || frequency.get() >= SCHEDULE_GRANULARITY {
+                    continue;
+                }
+                frequency.set(frequency.get() + 1);
+                // calculate cost if frequency goes up by increment of 1
+                // TODO replace dummy cost value
+                let estimated_cost = calculate_costs(&mut search_map, &frequencies, &routes, trip_data);
+                if estimated_cost < lowest_cost {
+                    lowest_cost = estimated_cost;
+                    best_fragment = Some((time, id.clone()));
+                }
+                frequency.set(frequency.get() - 1);
+            }
+        }
+        
+        let best_fragment = match best_fragment {
+            Some(best_fragment) => best_fragment,
+            None => return curr_schedule,
+        };
+        
+        *frequencies[best_fragment.0].get_mut(&best_fragment.1).unwrap().get_mut() += 1;
+        // run_simulation
+        // todo get correct cost
+        let cost = 100.0;
+        if cost < curr_cost {
+            curr_cost = cost;
+        } else {
+            *frequencies[best_fragment.0].get_mut(&best_fragment.1).unwrap().get_mut() -= 1;
+            blacklisted_fragments.insert(best_fragment);
+        }
+    }
+}
+
+// for search, modify graph? what we could do is duplicate each node and edge per route. then if 
+// a route is no longer helpful for us, we dip 
+
+// generate modified map for use in shortest routes search
+// creates a map where each route has its own nodes and edges; if two routes share the same 
+// nodes and edges, walk nodes of cost 0 connect them 
+
+
+#[derive(PartialEq, Eq, Hash)]
+pub struct SearchNode {
+    route: String,
+    old_node: NodeIndex,
+}
+
+pub type SearchGraph = Graph<SearchNode, Edge>;
+
+struct SearchMap {
+    map: SearchGraph,
+    old_to_new_nodes: HashMap<NodeIndex, Vec<NodeIndex>>,
+    old_to_new_edges: HashMap<EdgeIndex, Vec<EdgeIndex>>,
+    new_to_old_nodes: HashMap<NodeIndex, NodeIndex>,
+    new_to_old_edges: HashMap<EdgeIndex, EdgeIndex>,
+}
+
+// Maps a subway map to a form that is more amenable to searching for best routes.
+// Each route is given its own nodes and edges, but if multiple routes share nodes in the actual 
+// map, they will be connected with walk edges. 
+fn generate_shortest_path_search_map(subway_map: &SubwayMap, routes: &HashMap<String, Route>) -> SearchMap {
+    let mut search_map  = SearchGraph::new();
+    let mut old_to_new_nodes = HashMap::new();
+    let mut old_to_new_edges = HashMap::new();
+    let mut new_to_old_nodes = HashMap::new();
+    let mut new_to_old_edges = HashMap::new();
+    
+    // For each route create nodes and edges for it
+    for (key, route) in routes.iter() {
+        let mut create_node = |old_node: NodeIndex, search_map: &mut SearchGraph| -> NodeIndex {
+            let new_nodes = old_to_new_nodes.entry(old_node).or_insert(Vec::new());
+            let route_node = search_map.add_node(SearchNode { route: key.clone(), old_node });
+            new_nodes.push(route_node);
+            new_to_old_nodes.insert(route_node, old_node);
+            route_node
+        };
+        
+        for edge in route.station_to.values() {
+            let (start, end) = subway_map.edge_endpoints(*edge).unwrap();
+            let new_start_node = create_node(start, &mut search_map);
+            let new_end_node = create_node(end, &mut search_map);
+            let new_edge = search_map.add_edge(new_start_node, new_end_node, subway_map[*edge]);
+            old_to_new_edges.entry(*edge).or_insert(Vec::new()).push(new_edge);
+            new_to_old_edges.insert(new_edge, *edge);
+        }
+    }
+    
+    // Connect virtual nodes that correspond to the same station together with walk edges. This 
+    // represents the transfer necessary to move between routes
+    for related_nodes in old_to_new_nodes.values() {
+        for i in 0..related_nodes.len()-1 {
+            for j in i+1..related_nodes.len() {
+                search_map.add_edge(related_nodes[i], related_nodes[j], Edge { ty: crate::EdgeType::Walk, weight: 1 });
+            }
+        }
+    }
+    
+    // Create corresponding walk edges for those found on the original graph
+    for edge in subway_map.edge_references() {
+        if let EdgeType::Walk = edge.weight().ty {
+            let node1 = edge.source();
+            let node2 = edge.target();
+            // ignore cases where no routes in the network use a station node
+            if !(old_to_new_nodes.contains_key(&node1) && old_to_new_nodes.contains_key(&node2)) {
+                continue;
+            }
+            let new_nodes1 = &old_to_new_nodes[&node1];
+            let new_nodes2 = &old_to_new_nodes[&node2];
+            // TODO: this causes quadratic blowup of walk edge numbers which is sometimes excessive.
+            // Is this too aggressive? Can we just create one edge instead?
+            for node1 in new_nodes1 {
+                for node2 in new_nodes2 {
+                    search_map.add_edge(*node1,*node2, *edge.weight());
+                }
+            }
+        }
+    }
+    
+    SearchMap { map: search_map, old_to_new_nodes, old_to_new_edges, new_to_old_nodes, new_to_old_edges }
+}
+
+// Finds the k shortest paths between the start and end nodes.
+// Note that start and end must be old nodes. 
+// things to think about here
+// - shortest paths need to take routes into account: even if track is physically connected,
+// it doesn't mean there's a route that actually is able to go through the entire physical connection
+// - if part of route a to d goes through b to c, we can take any route that goes on those
+// and add their frequency to reduce travel times 
+// NOTE: this tactic only works if there aren't cases where routes X and Y share tracks, diverge,
+// then merge back together. this can be problematic as the section where they diverge may have varying
+// speeds, eg express vs local service. This can be seen with D and rush hour B service, where the lines
+// reconnect in the Bronx. For now the B service will always terminate earlier than this point. TODO
+// lift this limitation?
+fn shortest_paths(start: NodeIndex, end: NodeIndex, search_map: &mut SearchMap, mut k: usize) -> Vec<Vec<RoutePath>> {
+    assert!(k >= 1);
+    let valid_end_nodes: HashSet<_> = search_map.old_to_new_nodes[&end].clone().into_iter().collect();
+    
+    let start_nodes = &search_map.old_to_new_nodes[&start];
+
+    // create virtual node + edges to represent start of search
+    // note that route and old nodeindex are invalid for virtual node
+    let virtual_start_node = search_map.map.add_node(SearchNode { route: String::new(), old_node: NodeIndex::new(0) });
+
+    for start_node in start_nodes {
+        search_map.map.add_edge(virtual_start_node, *start_node, Edge { ty: EdgeType::Walk, weight: 0 });
+    }
+    
+    // TODO: should we consider route frequencies in this calculation? pass that data here if yes
+    let (costs, destination) = dijkstra(&search_map.map, virtual_start_node, &valid_end_nodes, |edge| edge.weight().weight);
+    let destination = match destination {
+        Terminated::Exhaustive => panic!("did not encounter the desired destination in shortest path search"),
+        Terminated::At(destination) => destination,
+    };
+    
+    let routes = search_to_routes(search_map, &costs, destination);
+    k -= 1;
+    for route in &routes {
+        if k == 0 {
+            break;
+        }
+
+       // TODO calculate more routes by disabling edges 
+
+        k -= 1;
+    }
+
+    search_map.map.remove_node(virtual_start_node);
+
+    vec![routes]
+}
+
+pub struct RoutePath {
+    id: String,
+    cost: u16,
+    start_node: NodeIndex,
+    end_node: NodeIndex,
+    edge_to_next: Option<EdgeIndex>,
+}
+
+fn search_to_routes(search_map: &SearchMap, costs: &HashMap<NodeIndex, (u16, Option<EdgeIndex>)>, destination: NodeIndex) -> Vec<RoutePath> {
+    let mut curr_edge = costs[&destination].1.unwrap();
+    let mut routes = Vec::new();
+    
+    // These are updated as we're traversing a current route, and used to get the final route data
+    let mut curr_end_node = search_map.map.edge_endpoints(curr_edge).unwrap().0; 
+    let mut curr_start_node = curr_end_node;
+    let mut curr_cost = 0;
+    let mut curr_route = None;
+    loop {
+        let source_node = search_map.map.edge_endpoints(curr_edge).unwrap().0;
+        let edge_ref = &search_map.map[curr_edge];
+        if edge_ref.ty == EdgeType::Walk {
+            if let Some(curr_route) = curr_route.take() {
+                routes.push(RoutePath { id: curr_route, cost: curr_cost, start_node: curr_start_node, end_node: curr_end_node, edge_to_next: Some(curr_edge) });
+            }
+            curr_cost = 0;
+        }
+        else {
+            if curr_route.is_none() {
+                curr_route = Some(search_map.map[source_node].route.clone());
+                curr_end_node = search_map.map.edge_endpoints(curr_edge).unwrap().1;
+            }
+            curr_start_node = search_map.map.edge_endpoints(curr_edge).unwrap().0;
+            curr_cost += edge_ref.weight;
+        }
+
+        curr_edge = match costs[&source_node].1 {
+            Some(curr_edge) => curr_edge,
+            None => {
+                // TODO is this necessary?
+                // routes.push(RoutePath {id: curr_route.take().unwrap(), cost: curr_cost, start_node: curr_start_node, end_node: curr_end_node, edge_to_next: Some(curr_edge)});
+                break;
+            }
+        };
+    };
+
+    routes.reverse();
+    routes
+}
+
+const WALK_MULTIPLIER: f32 = 1.0;
+const WAIT_MULTIPLIER: f32 = 1.0;
+
+fn calculate_costs(search_map: &mut SearchMap, frequencies: &[HashMap<String, Cell<i64>>], routes: &HashMap<String, Route>, trip_data: &TripData) -> f32 {
+    let mut total_cost = 0.;
+    for (time, trips) in trip_data.iter() {
+        for trip in trips {
+            // TODO do more than one path?
+            // TODO cache this information?
+            let paths = shortest_paths(trip.start, trip.end, search_map, 1);
+            assert!(!paths.is_empty());
+            let mut lowest_cost = f32::INFINITY;
+            for (i, path) in paths.iter().enumerate() {
+                let mut curr_time = *time as f32;
+                let mut cost = 0.;
+                for segment in path {
+                    let curr_schedule = curr_time as i64 / SCHEDULE_GRANULARITY;
+                    let wait = SCHEDULE_GRANULARITY as f32 / frequencies[curr_schedule as usize][&segment.id].get() as f32 * WAIT_MULTIPLIER;
+                    let total_segment_cost = segment.cost as f32 + wait;
+                    cost += total_segment_cost;
+                    curr_time += total_segment_cost;
+                    if let Some(edge_idx) = segment.edge_to_next {
+                        let walk_time = search_map.map[edge_idx].weight as f32 * WALK_MULTIPLIER;
+                        cost += walk_time;
+                        curr_time += walk_time;
+                    }
+                }
+                lowest_cost = lowest_cost.min(cost);
+            }
+            total_cost += lowest_cost * trip.count as f32;
+        }
+    }
+    total_cost
 }

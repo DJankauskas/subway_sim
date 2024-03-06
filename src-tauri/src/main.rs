@@ -2,6 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod simulator;
+mod shortest_path;
+
 use simulator::{Route, Simulator, SubwayMap, TrackStationId};
 
 use std::collections::{HashMap, HashSet};
@@ -160,6 +162,7 @@ async fn run_simulation(
 
         // TODO: is this restriction overly limiting?
         routes.push(Route {
+            name: route.name,
             start_station: cytoscape_id_map[&route.nodes[0]],
             station_to,
             offset: route.offset,
