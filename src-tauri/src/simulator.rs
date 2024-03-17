@@ -6,7 +6,6 @@ use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use petgraph::Graph;
-use serde::Serialize;
 
 use crate::shortest_path::{dijkstra, Terminated};
 use crate::{Edge, EdgeType};
@@ -477,7 +476,7 @@ impl Simulator {
                                     states.drain(scheduled_at as usize+1..);
                                     self = states.pop().unwrap();
                                     train_positions.retain(|p: &TrainPositions| (p.time as i32) < scheduled_at);
-                                    break 'iteration;
+                                    continue 'iteration;
                                 }
 
                             } else {
@@ -780,7 +779,7 @@ pub fn shortest_paths(start: NodeIndex, end: NodeIndex, search_map: &mut SearchM
 
 #[derive(Debug)]
 pub struct RoutePath {
-    id: String,
+    routes: HashSet<String>,
     cost: u16,
     start_node: NodeIndex,
     end_node: NodeIndex,
@@ -789,26 +788,32 @@ pub struct RoutePath {
 
 fn search_to_routes(search_map: &SearchMap, costs: &HashMap<NodeIndex, (u16, Option<EdgeIndex>)>, destination: NodeIndex) -> Vec<RoutePath> {
     let mut curr_edge = costs[&destination].1.unwrap();
-    let mut routes = Vec::new();
+    let mut paths = Vec::new();
     
     // These are updated as we're traversing a current route, and used to get the final route data
     let mut curr_end_node = search_map.map.edge_endpoints(curr_edge).unwrap().0; 
     let mut curr_start_node = curr_end_node;
     let mut curr_cost = 0;
-    let mut curr_route = None;
+    let mut currently_in_segment = false;
     loop {
         let source_node = search_map.map.edge_endpoints(curr_edge).unwrap().0;
         let edge_ref = &search_map.map[curr_edge];
         if edge_ref.ty == EdgeType::Walk {
-            if let Some(curr_route) = curr_route.take() {
-                routes.push(RoutePath { id: curr_route, cost: curr_cost, start_node: curr_start_node, end_node: curr_end_node, edge_to_next: Some(curr_edge) });
+            if currently_in_segment {
+                let old_start_node = search_map.map[curr_start_node].old_node;
+                let start_routes: HashSet<_> = search_map.old_to_new_nodes[&old_start_node].iter().map(|node| search_map.map[*node].route.clone()).collect();
+                let old_end_node = search_map.map[curr_end_node].old_node;
+                let end_routes: HashSet<_> = search_map.old_to_new_nodes[&old_end_node].iter().map(|node| search_map.map[*node].route.clone()).collect();
+                let routes = HashSet::from_iter(start_routes.intersection(&end_routes).cloned());
+                paths.push(RoutePath { routes, cost: curr_cost, start_node: curr_start_node, end_node: curr_end_node, edge_to_next: Some(curr_edge) });
+                currently_in_segment = false;
             }
             curr_cost = 0;
         }
         else {
-            if curr_route.is_none() {
-                curr_route = Some(search_map.map[source_node].route.clone());
+            if !currently_in_segment {
                 curr_end_node = search_map.map.edge_endpoints(curr_edge).unwrap().1;
+                currently_in_segment = true;
             }
             curr_start_node = search_map.map.edge_endpoints(curr_edge).unwrap().0;
             curr_cost += edge_ref.weight;
@@ -824,8 +829,8 @@ fn search_to_routes(search_map: &SearchMap, costs: &HashMap<NodeIndex, (u16, Opt
         };
     };
 
-    routes.reverse();
-    routes
+    paths.reverse();
+    paths
 }
 
 const WALK_MULTIPLIER: f32 = 1.0;
@@ -845,7 +850,11 @@ fn calculate_costs(search_map: &mut SearchMap, frequencies: &[HashMap<String, Ce
                 let mut cost = 0.;
                 for segment in path {
                     let curr_schedule = curr_time as i64 / SCHEDULE_GRANULARITY;
-                    let wait = SCHEDULE_GRANULARITY as f32 / frequencies[curr_schedule as usize][&segment.id].get() as f32 * WAIT_MULTIPLIER;
+                    let mut total_frequency = 0;
+                    for route in &segment.routes {
+                        total_frequency += frequencies[curr_schedule as usize][route].get();
+                    }
+                    let wait = SCHEDULE_GRANULARITY as f32 / total_frequency as f32 * WAIT_MULTIPLIER;
                     let total_segment_cost = segment.cost as f32 + wait;
                     cost += total_segment_cost;
                     curr_time += total_segment_cost;
