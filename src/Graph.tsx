@@ -42,7 +42,7 @@ interface StationStatistic {
 type GraphProps = {
     initialSubwayGraph: SubwayGraph,
     mode: GraphMode,
-    onShortestPath: (graph: any, source: string, target: string) => void,
+    onShortestPath: (graph: any, routes: any, source: string, target: string) => void,
     onSimulate: (graph: any, routes: any, frequency: number) => Promise<SimulationResults>,
     getCurrentSubwayGraph?: MutableRefObject<() => SubwayGraph>,
 }
@@ -245,6 +245,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                             serializeGraph(graph);
                         onShortestPath(
                             g,
+                            routes,
                             selected[0].id(),
                             selected[1].id()
                         );
@@ -330,7 +331,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                 }
             }}>Simulate</button>
             <input type="number" pattern="[0-9]*" placeholder="Frequency" value={frequency} onChange={e => setFrequency(e.currentTarget.value)} />
-            <div hidden>
+            <div hidden={false}>
                 {Object.entries(routes).map(([key, data]) => <div key={key}><div>{data.name}</div><input placeholder="Offset" type="number" pattern="[0-9]*" value={routeOffsets[key] || ""} onChange={e => setRouteOffsets({ ...routeOffsets, [key]: parseInt(e.currentTarget.value) })} /></div>)}
             </div>
             {simulationResults ?
@@ -560,6 +561,7 @@ function trainPositionsToStringlines(positions: TrainPositions[], trainToRoute: 
     for (const position of positions) {
         if (position.time > to) break;
         for (const train of position.trains) {
+            trainPositions[train.id] ||= [];
             if (train.pos < 0) {
                 console.log("detected train with negative position!");
             }

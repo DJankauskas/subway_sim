@@ -6,6 +6,7 @@ use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use petgraph::Graph;
+use serde::Serialize;
 
 use crate::shortest_path::{dijkstra, Terminated};
 use crate::{Edge, EdgeType};
@@ -650,32 +651,37 @@ pub struct SearchNode {
 
 pub type SearchGraph = Graph<SearchNode, Edge>;
 
-struct SearchMap {
+pub struct SearchMap {
     map: SearchGraph,
     old_to_new_nodes: HashMap<NodeIndex, Vec<NodeIndex>>,
     old_to_new_edges: HashMap<EdgeIndex, Vec<EdgeIndex>>,
-    new_to_old_nodes: HashMap<NodeIndex, NodeIndex>,
     new_to_old_edges: HashMap<EdgeIndex, EdgeIndex>,
 }
 
 // Maps a subway map to a form that is more amenable to searching for best routes.
 // Each route is given its own nodes and edges, but if multiple routes share nodes in the actual 
 // map, they will be connected with walk edges. 
-fn generate_shortest_path_search_map(subway_map: &SubwayMap, routes: &HashMap<String, Route>) -> SearchMap {
+pub fn generate_shortest_path_search_map(subway_map: &SubwayMap, routes: &HashMap<String, Route>) -> SearchMap {
     let mut search_map  = SearchGraph::new();
     let mut old_to_new_nodes = HashMap::new();
     let mut old_to_new_edges = HashMap::new();
-    let mut new_to_old_nodes = HashMap::new();
     let mut new_to_old_edges = HashMap::new();
+    
+    let mut route_old_to_new_nodes = HashMap::new();
     
     // For each route create nodes and edges for it
     for (key, route) in routes.iter() {
         let mut create_node = |old_node: NodeIndex, search_map: &mut SearchGraph| -> NodeIndex {
-            let new_nodes = old_to_new_nodes.entry(old_node).or_insert(Vec::new());
-            let route_node = search_map.add_node(SearchNode { route: key.clone(), old_node });
-            new_nodes.push(route_node);
-            new_to_old_nodes.insert(route_node, old_node);
-            route_node
+            match route_old_to_new_nodes.get(&(key, old_node)) {
+                Some(node) => *node,
+                None => {
+                let new_nodes = old_to_new_nodes.entry(old_node).or_insert(Vec::new());
+                let route_node = search_map.add_node(SearchNode { route: key.clone(), old_node });
+                new_nodes.push(route_node);
+                route_old_to_new_nodes.insert((key, old_node), route_node);
+                route_node
+                }
+            } 
         };
         
         for edge in route.station_to.values() {
@@ -719,7 +725,7 @@ fn generate_shortest_path_search_map(subway_map: &SubwayMap, routes: &HashMap<St
         }
     }
     
-    SearchMap { map: search_map, old_to_new_nodes, old_to_new_edges, new_to_old_nodes, new_to_old_edges }
+    SearchMap { map: search_map, old_to_new_nodes, old_to_new_edges, new_to_old_edges }
 }
 
 // Finds the k shortest paths between the start and end nodes.
@@ -734,7 +740,7 @@ fn generate_shortest_path_search_map(subway_map: &SubwayMap, routes: &HashMap<St
 // speeds, eg express vs local service. This can be seen with D and rush hour B service, where the lines
 // reconnect in the Bronx. For now the B service will always terminate earlier than this point. TODO
 // lift this limitation?
-fn shortest_paths(start: NodeIndex, end: NodeIndex, search_map: &mut SearchMap, mut k: usize) -> Vec<Vec<RoutePath>> {
+pub fn shortest_paths(start: NodeIndex, end: NodeIndex, search_map: &mut SearchMap, mut k: usize) -> Vec<Vec<RoutePath>> {
     assert!(k >= 1);
     let valid_end_nodes: HashSet<_> = search_map.old_to_new_nodes[&end].clone().into_iter().collect();
     
@@ -772,6 +778,7 @@ fn shortest_paths(start: NodeIndex, end: NodeIndex, search_map: &mut SearchMap, 
     vec![routes]
 }
 
+#[derive(Debug)]
 pub struct RoutePath {
     id: String,
     cost: u16,

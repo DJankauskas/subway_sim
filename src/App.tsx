@@ -13,8 +13,8 @@ interface ShortestPath {
   path: string[]
 }
 
-async function shortestPath(graph: any, source: string, target: string): Promise<ShortestPath | null>  {
-  const result = await invoke('shortest_path', {jsGraph: graph, source, target});
+async function shortestPath(graph: any, routes: any, source: string, target: string): Promise<ShortestPath | null>  {
+  const result = await invoke('shortest_path', {jsGraph: graph, jsRoutes: routes, source, target});
   alert(JSON.stringify(result))
   return result as any;
 }

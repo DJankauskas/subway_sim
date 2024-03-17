@@ -4,7 +4,7 @@
 mod simulator;
 mod shortest_path;
 
-use simulator::{Route, Simulator, SubwayMap, TrackStationId};
+use simulator::{generate_shortest_path_search_map, shortest_paths, Route, RoutePath, Simulator, SubwayMap, TrackStationId};
 
 use std::collections::{HashMap, HashSet};
 
@@ -59,6 +59,7 @@ struct JsRoute {
     id: String,
     nodes: Vec<String>,
     edges: Vec<String>,
+    #[serde(default)]
     offset: u64,
 }
 
@@ -103,10 +104,19 @@ fn js_graph_to_subway_map(
     (graph, cytoscape_map, petgraph_map)
 }
 
-#[allow(unused)]
-fn shortest_path() -> Option<ShortestPath> {
-    /* 
+#[tauri::command]
+fn shortest_path(js_graph: JsGraph, js_routes: JsRoutes, source: String, target: String) {
     let (graph, map, _) = js_graph_to_subway_map(js_graph);
+    let (routes, _) = js_routes_to_routes(js_routes, &graph, &map);
+    let routes: HashMap<_, _> = routes.into_iter().map(|route| (route.name.clone(), route)).collect();
+    let mut search_map = generate_shortest_path_search_map(&graph, &routes);
+    let start = map[&source];
+    let end = map[&target];
+    let paths = shortest_paths(start, end, &mut search_map, 1);
+    eprintln!("Shortest paths: {:?}", paths);
+    
+    
+    /* 
 
     let end = *map.get(target).unwrap();
 
@@ -128,21 +138,11 @@ fn shortest_path() -> Option<ShortestPath> {
         path: result,
     })
     */
-    None
 }
 
-#[tauri::command]
-async fn run_simulation(
-    js_graph: JsGraph,
-    js_routes: JsRoutes,
-    frequency: u64
-) -> Result<JsSimulationResults, String> {
-    eprintln!("start running simulation");
-    let mut routes = Vec::with_capacity(js_routes.len());
-    let (subway_map, cytoscape_id_map, petgraph_map) = js_graph_to_subway_map(js_graph.clone());
-    
+fn js_routes_to_routes(js_routes: JsRoutes, subway_map: &SubwayMap, cytoscape_id_map: &HashMap<String, NodeIndex>) -> (Vec<Route>, Vec<String>) {
     let mut route_id_map = Vec::new();
-
+    let mut routes = Vec::new();
     for (_, route) in js_routes {
         let mut station_to = HashMap::with_capacity(route.nodes.len());
         let node_ids: HashSet<_> = route
@@ -169,6 +169,20 @@ async fn run_simulation(
         });
         route_id_map.push(route.id.clone());
     }
+    (routes, route_id_map)
+}
+
+#[tauri::command]
+async fn run_simulation(
+    js_graph: JsGraph,
+    js_routes: JsRoutes,
+    frequency: u64
+) -> Result<JsSimulationResults, String> {
+    eprintln!("start running simulation");
+    let (subway_map, cytoscape_id_map, petgraph_map) = js_graph_to_subway_map(js_graph.clone());
+    
+    let (routes, route_id_map) = js_routes_to_routes(js_routes, &subway_map, &cytoscape_id_map);
+    
     let simulator = Simulator::new(subway_map, routes.clone());
     let simulation_results = simulator.run(60, frequency);
     let train_positions: Vec<_> = simulation_results
@@ -264,7 +278,7 @@ struct JsSimulationResults {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![run_simulation])
+        .invoke_handler(tauri::generate_handler![run_simulation, shortest_path])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
