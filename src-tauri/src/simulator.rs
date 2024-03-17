@@ -16,7 +16,7 @@ pub type TrackId = EdgeIndex;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct TrainId(pub u32);
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Train {
     pub id: TrainId,
     /// The current node or track the train is on
@@ -29,14 +29,14 @@ pub struct Train {
     pub route: RouteId,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Track {
     pub id: TrackId,
     pub length: u16,
     pub trains: VecDeque<TrainId>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Station {
     pub id: StationId,
     pub train: Option<TrainId>,
@@ -60,7 +60,7 @@ pub struct Route {
     pub offset: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Simulator {
     subway_map: SubwayMap,
     routes: HashMap<RouteId, Route>,
@@ -374,6 +374,189 @@ impl Simulator {
                 .collect(),
         }
     }
+    
+    
+    // This is mostly a copy paste of the run function right now.
+    // TODO figure out how to consolidate code with run 
+    pub fn hyper_hacky_schedule_trains(mut self, iterations: i32, frequency: u64, desired_frequencies: &Frequencies) -> SimulationResults {
+        let mut train_to_route = HashMap::new();
+        let traversal_order = self.traversal_order.clone();
+        println!("{:?}", traversal_order);
+        for route in self.routes.values() {
+            println!("{:?}", route.start_station);
+        }
+
+        let mut train_positions = Vec::new();
+
+        let mut t = 0;
+        
+        let mut train_scheduled_at = HashMap::new();
+        let mut states = Vec::with_capacity(iterations as usize);
+
+        'iteration:
+        while t < iterations {
+            states.push(self.clone());
+            for track_station in &traversal_order {
+                match *track_station {
+                    TrackStationId::Station(station) => {
+                        self.station_to_track(station, TIME_STEP);
+                    }
+                    TrackStationId::Track(track) => {
+                        let mut i = 0;
+                        let mut last_train_pos = f64::INFINITY;
+                        let next_station_id = self.subway_map.edge_endpoints(track).unwrap().1;
+                        while i < self.tracks.get_mut(&track).unwrap().trains.len() {
+                            let track_mut = self.tracks.get_mut(&track).unwrap();
+                            if self.stations[&next_station_id].train.is_some() {
+                                last_train_pos =
+                                    f64_max(track_mut.length as f64 - MIN_TRAIN_DISTANCE, 0.0);
+                            }
+                            let curr_train_id = track_mut.trains[i];
+                            let curr_train_mut = self.trains.get_mut(&curr_train_id).unwrap();
+                            let mut time_left = TIME_STEP;
+                            let travel_distance = f64_min(
+                                f64_min(
+                                    time_left,
+                                    f64_max(track_mut.length as f64 - curr_train_mut.pos, 0.0),
+                                ),
+                                f64_max(
+                                    if curr_train_mut.pos + MIN_TRAIN_DISTANCE >= last_train_pos {
+                                        last_train_pos - MIN_TRAIN_DISTANCE - curr_train_mut.pos
+                                    } else {
+                                        last_train_pos - curr_train_mut.pos
+                                    },
+                                    0.0,
+                                ),
+                            );
+                            curr_train_mut.pos += travel_distance;
+                            time_left -= travel_distance;
+                            // we're done with the current track, and need to move into the station
+                            if curr_train_mut.pos >= track_mut.length as f64
+                                && self.stations[&next_station_id].train.is_none()
+                            {
+                                if self.stations[&next_station_id].train.is_none() {
+                                    debug_assert_eq!(i, 0);
+                                    track_mut.trains.pop_front();
+                                    debug_assert!(
+                                        self.stations
+                                            .get_mut(&next_station_id)
+                                            .unwrap()
+                                            .train
+                                            .is_none(),
+                                        "travel distance is {travel_distance}"
+                                    );
+                                    let next_station_mut =
+                                        self.stations.get_mut(&next_station_id).unwrap();
+                                    next_station_mut.train = Some(curr_train_id);
+                                    if t >= 0 {
+                                        next_station_mut
+                                            .arrival_times
+                                            .entry(curr_train_mut.route)
+                                            .or_default()
+                                            .push(t as f64 + travel_distance);
+                                    }
+
+                                    curr_train_mut.distance_travelled +=
+                                        self.tracks[&track].length as f64;
+
+                                    curr_train_mut.curr_section =
+                                        TrackStationId::Station(next_station_id);
+                                    curr_train_mut.pos = 0.0;
+
+                                    self.station_to_track(next_station_id, time_left);
+                                    // TODO: handle the fact that some station time may be wasted when the train could keep moving
+                                    // potentially some of this spaghetti code needs to get factored out into
+                                    // a separate function, tbd
+                                } else {
+                                    // MERGE CONFLICT
+                                    // todo random chance of allowing the merge conflict instead, and 
+                                    // continuing
+                                    let scheduled_at = train_scheduled_at[&curr_train_id];
+                                    t = scheduled_at;
+                                    states.drain(scheduled_at as usize+1..);
+                                    self = states.pop().unwrap();
+                                    train_positions.retain(|p: &TrainPositions| (p.time as i32) < scheduled_at);
+                                    break 'iteration;
+                                }
+
+                            } else {
+                                last_train_pos = curr_train_mut.pos;
+                                i += 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // TODO: replace with actual scheduling data
+            for (id, route) in &self.routes {
+                if (t - route.offset as i32) % (frequency as i32) != 0 {
+                    continue;
+                }
+                let start_station_mut = self.stations.get_mut(&route.start_station).unwrap();
+                // TODO: do I need to handle the case where this is not true?
+                if start_station_mut.train.is_none() {
+                    let train = Train {
+                        id: self.curr_train_id,
+                        curr_section: TrackStationId::Station(start_station_mut.id),
+                        pos: 0.0,
+                        distance_travelled: 0.0,
+                        route: *id,
+                    };
+
+                    start_station_mut.train = Some(self.curr_train_id);
+                    if t >= 0 {
+                        start_station_mut
+                            .arrival_times
+                            .entry(*id)
+                            .or_default()
+                            .push(t as f64);
+                    }
+                    self.trains.insert(self.curr_train_id, train);
+                    train_to_route.insert(self.curr_train_id, *id);
+                    train_scheduled_at.insert(self.curr_train_id, t);
+                    self.curr_train_id = TrainId(self.curr_train_id.0 + 1);
+                }
+            }
+
+            println!("Iteration: {t}, train count: {}", self.trains.len());
+
+            let mut curr_train_positions = Vec::new();
+            for (id, train) in &self.trains {
+                curr_train_positions.push(TrainPosition {
+                    id: *id,
+                    curr_section: train.curr_section,
+                    pos: train.pos,
+                    distance_travelled: train.distance_travelled,
+                })
+            }
+            if t >= 0 {
+                train_positions.push(TrainPositions {
+                    time: t as u32,
+                    trains: curr_train_positions,
+                });
+            }
+
+            t += 1;
+        }
+
+        SimulationResults {
+            train_positions,
+            train_to_route,
+            station_statistics: self
+                .stations
+                .into_iter()
+                .map(|(id, s)| {
+                    (
+                        id,
+                        StationStatistic {
+                            arrival_times: s.arrival_times,
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
 }
 
 /// Gets all nodes that have no out edges
@@ -399,9 +582,11 @@ type Schedule = HashMap<String, Vec<i64>>;
 const SCHEDULE_GRANULARITY: i64 = 30;
 const SCHEDULE_PERIOD: i64 = 240;
 
+type Frequencies = Vec<HashMap<String, Cell<i64>>>;
+
 
 fn optimize(subway_map: SubwayMap, routes: HashMap<String, Route>, trip_data: &TripData) -> Schedule {
-    let mut frequencies: Vec<HashMap<String, Cell<i64>>> = Vec::with_capacity((SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) as usize);
+    let mut frequencies: Frequencies  = Vec::with_capacity((SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) as usize);
     // blacklisted time + route combos that should no longer be considered because they make performance worse
     let mut blacklisted_fragments = HashSet::new();
     
