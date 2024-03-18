@@ -16,7 +16,7 @@ export interface TrainPositions {
 }
 
 export interface TrainPosition {
-    id: number,
+    id: [number, number],
     curr_section: string,
     pos: number,
     distance_travelled: number,
@@ -24,7 +24,7 @@ export interface TrainPosition {
 
 export interface SimulationResults {
     train_positions: TrainPositions[],
-    train_to_route: Record<number, string>,
+    train_to_route: Record<string, string>,
     station_statistics: Record<string, StationStatistic>,
 }
 
@@ -557,15 +557,16 @@ const StationStatisticTooltip = ({ statistic, routes }: { statistic: StationStat
 }
 
 function trainPositionsToStringlines(positions: TrainPositions[], trainToRoute: Record<number, string>, to: number, routes: Set<string>): Record<number, Stringline[]> {
-    const trainPositions: Record<number, StringlinePoint[]> = {};
+    const trainPositions: Record<string, StringlinePoint[]> = {};
     for (const position of positions) {
         if (position.time > to) break;
         for (const train of position.trains) {
-            trainPositions[train.id] ||= [];
+            const trainKey = `${train.id[0]}_${train.id[1]}`;
+            trainPositions[trainKey] ||= [];
             if (train.pos < 0) {
                 console.log("detected train with negative position!");
             }
-            trainPositions[train.id].push({ x: position.time, y: train.pos + train.distance_travelled });
+            trainPositions[trainKey].push({ x: position.time, y: train.pos + train.distance_travelled });
             train.curr_section
         }
     }

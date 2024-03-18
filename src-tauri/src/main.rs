@@ -4,7 +4,7 @@
 mod simulator;
 mod shortest_path;
 
-use simulator::{generate_shortest_path_search_map, shortest_paths, Route, RoutePath, Simulator, SubwayMap, TrackStationId};
+use simulator::{generate_shortest_path_search_map, shortest_paths, Route, Simulator, SubwayMap, TrackStationId};
 
 use std::collections::{HashMap, HashSet};
 
@@ -194,7 +194,7 @@ async fn run_simulation(
                 .trains
                 .into_iter()
                 .map(|p| JsTrainPosition {
-                    id: p.id.0,
+                    id: (p.id.route_idx, p.id.count),
                     curr_section: petgraph_map[&p.curr_section].clone(),
                     pos: p.pos,
                     distance_travelled: p.distance_travelled,
@@ -203,7 +203,7 @@ async fn run_simulation(
         })
         .collect();
     
-    let train_to_route = simulation_results.train_to_route.into_iter().map(|(train, route)| (train.0, route_id_map[route.0 as usize].clone())).collect();
+    let train_to_route = simulation_results.train_to_route.into_iter().map(|(train, route)| (format!("{}_{}", train.route_idx, train.count), route_id_map[route.0 as usize].clone())).collect();
 
     let station_statistics = simulation_results
         .station_statistics
@@ -242,7 +242,7 @@ async fn run_simulation(
 
 #[derive(Serialize)]
 struct JsTrainPosition {
-    pub id: u32,
+    pub id: (u32, u32),
     pub curr_section: String,
     pub pos: f64,
     pub distance_travelled: f64,
@@ -272,7 +272,8 @@ struct JsArrivalStats {
 #[derive(Serialize)]
 struct JsSimulationResults {
     pub train_positions: Vec<JsTrainPositions>,
-    pub train_to_route: HashMap<u32, String>,
+    // String of routeid_trainnum to route string
+    pub train_to_route: HashMap<String, String>,
     pub station_statistics: HashMap<String, JsStationStatistic>,
 }
 

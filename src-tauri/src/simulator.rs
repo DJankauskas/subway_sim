@@ -15,7 +15,10 @@ pub type StationId = NodeIndex<u32>;
 pub type TrackId = EdgeIndex;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub struct TrainId(pub u32);
+pub struct TrainId {
+    pub route_idx: u32,
+    pub count: u32,
+}
 #[derive(Debug, Clone)]
 pub struct Train {
     pub id: TrainId,
@@ -65,7 +68,7 @@ pub struct Simulator {
     subway_map: SubwayMap,
     routes: HashMap<RouteId, Route>,
     trains: HashMap<TrainId, Train>,
-    curr_train_id: TrainId,
+    curr_train_counts: Vec<u32>,
     stations: HashMap<StationId, Station>,
     tracks: HashMap<TrackId, Track>,
     traversal_order: Vec<TrackStationId>,
@@ -157,7 +160,7 @@ impl Simulator {
             }
         }
 
-        let routes = routes
+        let routes: HashMap<_, _> = routes
             .into_iter()
             .enumerate()
             .map(|(i, route)| (RouteId(i as u32), route))
@@ -165,9 +168,9 @@ impl Simulator {
 
         Self {
             subway_map,
+            curr_train_counts: vec![0; routes.len()],
             routes,
             trains: HashMap::new(),
-            curr_train_id: TrainId(0),
             stations,
             tracks,
             traversal_order,
@@ -313,16 +316,17 @@ impl Simulator {
                 }
                 let start_station_mut = self.stations.get_mut(&route.start_station).unwrap();
                 // TODO: do I need to handle the case where this is not true?
+                let curr_train_id = TrainId{ route_idx: id.0, count: self.curr_train_counts[id.0 as usize] } ;
                 if start_station_mut.train.is_none() {
                     let train = Train {
-                        id: self.curr_train_id,
+                        id: curr_train_id,
                         curr_section: TrackStationId::Station(start_station_mut.id),
                         pos: 0.0,
                         distance_travelled: 0.0,
                         route: *id,
                     };
 
-                    start_station_mut.train = Some(self.curr_train_id);
+                    start_station_mut.train = Some(curr_train_id);
                     if t >= 0 {
                         start_station_mut
                             .arrival_times
@@ -330,9 +334,9 @@ impl Simulator {
                             .or_default()
                             .push(t as f64);
                     }
-                    self.trains.insert(self.curr_train_id, train);
-                    train_to_route.insert(self.curr_train_id, *id);
-                    self.curr_train_id = TrainId(self.curr_train_id.0 + 1);
+                    self.trains.insert(curr_train_id, train);
+                    train_to_route.insert(curr_train_id, *id);
+                    self.curr_train_counts[id.0 as usize] += 1;
                 }
             }
 
@@ -495,16 +499,17 @@ impl Simulator {
                 }
                 let start_station_mut = self.stations.get_mut(&route.start_station).unwrap();
                 // TODO: do I need to handle the case where this is not true?
+                let curr_train_id = TrainId { route_idx: id.0, count: self.curr_train_counts[id.0 as usize] };
                 if start_station_mut.train.is_none() {
                     let train = Train {
-                        id: self.curr_train_id,
+                        id: curr_train_id,
                         curr_section: TrackStationId::Station(start_station_mut.id),
                         pos: 0.0,
                         distance_travelled: 0.0,
                         route: *id,
                     };
 
-                    start_station_mut.train = Some(self.curr_train_id);
+                    start_station_mut.train = Some(curr_train_id);
                     if t >= 0 {
                         start_station_mut
                             .arrival_times
@@ -512,10 +517,10 @@ impl Simulator {
                             .or_default()
                             .push(t as f64);
                     }
-                    self.trains.insert(self.curr_train_id, train);
-                    train_to_route.insert(self.curr_train_id, *id);
-                    train_scheduled_at.insert(self.curr_train_id, t);
-                    self.curr_train_id = TrainId(self.curr_train_id.0 + 1);
+                    self.trains.insert(curr_train_id, train);
+                    train_to_route.insert(curr_train_id, *id);
+                    train_scheduled_at.insert(curr_train_id, t);
+                    self.curr_train_counts[id.0 as usize] += 1;
                 }
             }
 
