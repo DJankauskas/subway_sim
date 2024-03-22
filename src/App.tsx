@@ -26,6 +26,12 @@ async function runSimulation(graph: any, routes: any, frequency: number): Promis
   return result as any;
 }
 
+async function runOptimize(graph: any, routes: any): Promise<SimulationResults> {
+  const result = await invoke('run_optimize', {jsGraph: graph, jsRoutes: routes});
+  console.log(result);
+  return result as any;
+}
+
 
 function App() {
   const [mode, setMode] = useState<GraphMode>('display');
@@ -37,7 +43,7 @@ function App() {
   return (
     <div style={{display: 'flex', flexDirection: 'column'}}>
     <h1>Shortest Path</h1>
-      <Graph mode={mode} initialSubwayGraph={initialSubwayGraph} onSimulate={runSimulation} onShortestPath={shortestPath} getCurrentSubwayGraph={getSubwayGraph} />
+      <Graph mode={mode} initialSubwayGraph={initialSubwayGraph} onSimulate={runSimulation} onOptimize={runOptimize} onShortestPath={shortestPath} getCurrentSubwayGraph={getSubwayGraph} />
       <div>
         <div>
           <input type="radio" value="display" checked={mode === "display"} onChange={handleMode} />

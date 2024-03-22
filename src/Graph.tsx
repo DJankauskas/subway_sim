@@ -44,6 +44,7 @@ type GraphProps = {
     mode: GraphMode,
     onShortestPath: (graph: any, routes: any, source: string, target: string) => void,
     onSimulate: (graph: any, routes: any, frequency: number) => Promise<SimulationResults>,
+    onOptimize: (graph: any, routes: any) => Promise<SimulationResults>,
     getCurrentSubwayGraph?: MutableRefObject<() => SubwayGraph>,
 }
 
@@ -55,7 +56,7 @@ type GraphProps = {
 
 type EditType = { type: 'edgeCreate', edgeSourceNode: NodeSingular } | { type: 'edgeWeight', edge: EdgeSingular, renderedX: number, renderedY: number, weight: string } | { type: 'nodeName', node: NodeSingular, renderedX: number, renderedY: number, name: string } | { type: 'none' };
 
-export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, getCurrentSubwayGraph }: GraphProps) => {
+export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShortestPath, getCurrentSubwayGraph }: GraphProps) => {
     const divRef = useRef(null);
     const [graph, setGraph] = useState<Core | undefined>();
     const [editType, setEditType] = useState<EditType>({ type: 'none' });
@@ -330,6 +331,17 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onShortestPath, ge
                     setSimulationResults(results);
                 }
             }}>Simulate</button>
+            <button onClick={async () => {
+                if (graph) {
+                    const routesWithOffsets = {} as Record<string, Route & { offset: number }>;
+                    for (const [id, route] of Object.entries(routes)) {
+                        routesWithOffsets[id] = { ...route, offset: routeOffsets[id] || 0 };
+                    }
+                    const results = await onOptimize(serializeGraph(graph), routesWithOffsets);
+                    renderTrainPositions(graph, results.train_positions);
+                    setSimulationResults(results);
+                }
+            }}>Optimize</button>
             <input type="number" pattern="[0-9]*" placeholder="Frequency" value={frequency} onChange={e => setFrequency(e.currentTarget.value)} />
             <div hidden={false}>
                 {Object.entries(routes).map(([key, data]) => <div key={key}><div>{data.name}</div><input placeholder="Offset" type="number" pattern="[0-9]*" value={routeOffsets[key] || ""} onChange={e => setRouteOffsets({ ...routeOffsets, [key]: parseInt(e.currentTarget.value) })} /></div>)}

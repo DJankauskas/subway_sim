@@ -6,6 +6,7 @@ use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use petgraph::Graph;
+use z3::ast::Ast;
 
 use crate::shortest_path::{dijkstra, Terminated};
 use crate::{Edge, EdgeType};
@@ -19,6 +20,13 @@ pub struct TrainId {
     pub route_idx: u32,
     pub count: u32,
 }
+
+impl TrainId {
+    fn to_z3_arrival(self, ctx: &z3::Context) -> z3::ast::Int {
+        z3::ast::Int::new_const(ctx, format!("{}_{}", self.route_idx, self.count))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Train {
     pub id: TrainId,
@@ -174,6 +182,18 @@ impl Simulator {
             stations,
             tracks,
             traversal_order,
+        }
+    }
+    
+    fn reset(&mut self) {
+        self.trains.clear();
+        self.curr_train_counts = vec![0; self.routes.len()];
+        for station in self.stations.values_mut() {
+            station.arrival_times = HashMap::new();
+            station.train = None;
+        }
+        for track in self.tracks.values_mut() {
+            track.trains.clear();
         }
     }
 
@@ -382,13 +402,52 @@ impl Simulator {
     
     // This is mostly a copy paste of the run function right now.
     // TODO figure out how to consolidate code with run 
-    pub fn hyper_hacky_schedule_trains(mut self, iterations: i32, frequency: u64, desired_frequencies: &Frequencies) -> SimulationResults {
+    pub fn hyper_hacky_schedule_trains(&mut self, iterations: i32, desired_frequencies: &Frequencies) -> Option<SimulationResults> {
+        // use z3 SMT to calculate train position bounds
+        // details: each train is scheduled to depart at an integer time.
+        // the ith train for route r has a variable called r_i
+        // we get train departure times from z3. Any time we observe a conflict, we 
+        // add a rule probibiting the cause of the conflict, then jump back in time before the 
+        // conflict occurred. TODO to when exactly do we jump? Is there a way of being eager so that we can always jump back to an 
+        // easy time?
+        let z3_config = z3::Config::new();
+        let z3_context = z3::Context::new(&z3_config);
+        let z3_solver = z3::Solver::new(&z3_context);
+        
+        let mut frequencies = Vec::with_capacity(desired_frequencies.len());
+        for period in desired_frequencies {
+            let mut map = HashMap::with_capacity(period.len());
+            for (route, frequency) in period.iter() {
+                map.insert(route.clone(), frequency.get());
+            }
+            frequencies.push(map);
+        }
+        
+        // initialize ground rules for all departure variables. Specifically, 
+        // r_i+1 > r_i, and depending on frequencies set time bounds: 
+        // r_0 >= 0 and r_0 < SCHEDULE_GRANULARITY must always be true
+
+        for (id, route) in self.routes.iter() {
+            let mut start_time = 0;
+            let mut curr_idx = 0;
+            for freq in &frequencies {
+                let end_time = start_time + SCHEDULE_GRANULARITY;
+                
+                for i in 0..freq[&route.name] {
+                    let var = z3::ast::Int::new_const(&z3_context, format!("{}_{}", id.0, i+curr_idx));
+                    let next_var = z3::ast::Int::new_const(&z3_context, format!("{}_{}", id.0, i+curr_idx+1));
+                    z3_solver.assert(&var.lt(&next_var));
+                    z3_solver.assert(&var.ge(&z3::ast::Int::from_i64(&z3_context, start_time)));
+                    z3_solver.assert(&var.lt(&z3::ast::Int::from_i64(&z3_context, end_time)));
+                }
+
+                start_time = end_time;
+                curr_idx += freq[&route.name];
+            }
+        }
+        
         let mut train_to_route = HashMap::new();
         let traversal_order = self.traversal_order.clone();
-        println!("{:?}", traversal_order);
-        for route in self.routes.values() {
-            println!("{:?}", route.start_station);
-        }
 
         let mut train_positions = Vec::new();
 
@@ -396,10 +455,14 @@ impl Simulator {
         
         let mut train_scheduled_at = HashMap::new();
         let mut states = Vec::with_capacity(iterations as usize);
+        
+        let mut permanent_assertions = Vec::new();
 
         'iteration:
         while t < iterations {
-            states.push(self.clone());
+            states.push((self.clone(), frequencies.clone()));
+            z3_solver.push();
+
             for track_station in &traversal_order {
                 match *track_station {
                     TrackStationId::Station(station) => {
@@ -438,51 +501,73 @@ impl Simulator {
                             if curr_train_mut.pos >= track_mut.length as f64
                                 && self.stations[&next_station_id].train.is_none()
                             {
-                                if self.stations[&next_station_id].train.is_none() {
-                                    debug_assert_eq!(i, 0);
-                                    track_mut.trains.pop_front();
-                                    debug_assert!(
-                                        self.stations
-                                            .get_mut(&next_station_id)
-                                            .unwrap()
-                                            .train
-                                            .is_none(),
-                                        "travel distance is {travel_distance}"
-                                    );
-                                    let next_station_mut =
-                                        self.stations.get_mut(&next_station_id).unwrap();
-                                    next_station_mut.train = Some(curr_train_id);
-                                    if t >= 0 {
-                                        next_station_mut
-                                            .arrival_times
-                                            .entry(curr_train_mut.route)
-                                            .or_default()
-                                            .push(t as f64 + travel_distance);
+                                match self.stations[&next_station_id].train {
+                                    None => {
+                                        debug_assert_eq!(i, 0);
+                                        track_mut.trains.pop_front();
+                                        debug_assert!(
+                                            self.stations
+                                                .get_mut(&next_station_id)
+                                                .unwrap()
+                                                .train
+                                                .is_none(),
+                                            "travel distance is {travel_distance}"
+                                        );
+                                        let next_station_mut =
+                                            self.stations.get_mut(&next_station_id).unwrap();
+                                        next_station_mut.train = Some(curr_train_id);
+                                        if t >= 0 {
+                                            next_station_mut
+                                                .arrival_times
+                                                .entry(curr_train_mut.route)
+                                                .or_default()
+                                                .push(t as f64 + travel_distance);
+                                        }
+
+                                        curr_train_mut.distance_travelled +=
+                                            self.tracks[&track].length as f64;
+
+                                        curr_train_mut.curr_section =
+                                            TrackStationId::Station(next_station_id);
+                                        curr_train_mut.pos = 0.0;
+
+                                        self.station_to_track(next_station_id, time_left);
+                                        // TODO: handle the fact that some station time may be wasted when the train could keep moving
+                                        // potentially some of this spaghetti code needs to get factored out into
+                                        // a separate function, tbd
                                     }
+                                    Some(conflicting_train) => {
+                                        // MERGE CONFLICT
+                                        // todo random chance of allowing the merge conflict instead, and 
+                                        // continuing
+                                        let scheduled_at = train_scheduled_at[&curr_train_id];
+                                        t = scheduled_at;
+                                        let num_states_removed = states.len() - scheduled_at as usize;
+                                        states.drain(scheduled_at as usize+1..);
+                                        let prev_state = states.pop().unwrap();
 
-                                    curr_train_mut.distance_travelled +=
-                                        self.tracks[&track].length as f64;
+                                        *self = prev_state.0;
+                                        frequencies = prev_state.1;
 
-                                    curr_train_mut.curr_section =
-                                        TrackStationId::Station(next_station_id);
-                                    curr_train_mut.pos = 0.0;
+                                        train_positions.retain(|p: &TrainPositions| (p.time as i32) < scheduled_at);
+                                        // todo quadratic performance, FIXME
+                                        for assertion in &permanent_assertions {
+                                            z3_solver.assert(assertion);
+                                        }
+                                
+                                        // restore solver state to the iteration we're returning to
+                                        // TODO is this actually necessary? does this preserve too little
+                                        // information? 
+                                        z3_solver.pop(num_states_removed as u32);
+                                        // encode conflict
+                                        let conflicting_train_scheduled_at = conflicting_train.to_z3_arrival(&z3_context)._eq(&z3::ast::Int::from_i64(&z3_context, train_scheduled_at[&conflicting_train] as i64));
+                                        let assertion = conflicting_train_scheduled_at.implies(&curr_train_id.to_z3_arrival(&z3_context)._eq(&z3::ast::Int::from_i64(&z3_context, scheduled_at as i64)).not());
+                                        z3_solver.assert(&assertion);
+                                        permanent_assertions.push(assertion);
 
-                                    self.station_to_track(next_station_id, time_left);
-                                    // TODO: handle the fact that some station time may be wasted when the train could keep moving
-                                    // potentially some of this spaghetti code needs to get factored out into
-                                    // a separate function, tbd
-                                } else {
-                                    // MERGE CONFLICT
-                                    // todo random chance of allowing the merge conflict instead, and 
-                                    // continuing
-                                    let scheduled_at = train_scheduled_at[&curr_train_id];
-                                    t = scheduled_at;
-                                    states.drain(scheduled_at as usize+1..);
-                                    self = states.pop().unwrap();
-                                    train_positions.retain(|p: &TrainPositions| (p.time as i32) < scheduled_at);
-                                    continue 'iteration;
-                                }
-
+                                        continue 'iteration;
+                                    }
+                                };
                             } else {
                                 last_train_pos = curr_train_mut.pos;
                                 i += 1;
@@ -494,12 +579,14 @@ impl Simulator {
 
             // TODO: replace with actual scheduling data
             for (id, route) in &self.routes {
-                if (t - route.offset as i32) % (frequency as i32) != 0 {
-                    continue;
-                }
                 let start_station_mut = self.stations.get_mut(&route.start_station).unwrap();
                 // TODO: do I need to handle the case where this is not true?
                 let curr_train_id = TrainId { route_idx: id.0, count: self.curr_train_counts[id.0 as usize] };
+                
+                if frequencies[(t as i64 / SCHEDULE_GRANULARITY) as usize][&route.name] == 0 {
+                    continue;
+                }
+
                 if start_station_mut.train.is_none() {
                     let train = Train {
                         id: curr_train_id,
@@ -508,6 +595,37 @@ impl Simulator {
                         distance_travelled: 0.0,
                         route: *id,
                     };
+
+                    // logic to handle when trying to schedule trains:
+                    // - should we wait if there's currently a train too close on the directly proceeding 
+                    //   track? right now, will say no, but otherwise this would be the first check
+                    // - check if we've failed frequency requirements for last bin. if yes, report fail
+                    // - add an assertion to solver saying current train departure = time. if we get a sat 
+                    //   model, proceed. otherwise, don't schedule a train 
+                    // - the difficult thing to figure out is: what assertions can we keep permanently,
+                    //   and what can we get rid of? would be nice if we could maintain a list of permanent assumptions
+                    //   but otherwise do pop and push logic. a nice thing to assert then pop is depart_var = (or >=) curr time
+                    //   however when backtracking this could of course get invalidated, or could it? think about this
+                    
+                    let curr_train_z3 = curr_train_id.to_z3_arrival(&z3_context);
+                    let curr_time_z3 = z3::ast::Int::from_i64(&z3_context, t.into());
+                    
+                    z3_solver.push();
+                    if z3_solver.check_assumptions(&[curr_train_z3.ge(&curr_time_z3)]) != z3::SatResult::Sat {
+                        // TODO is this ever recoverable?
+                        return None;
+                    }
+                    let z3_departure_equality = curr_train_z3._eq(&curr_time_z3);
+                    z3_solver.assert(&z3_departure_equality);
+                    if z3_solver.check_assumptions(&[]) != z3::SatResult::Sat {
+                        z3_solver.pop(1);
+                        continue;
+                    }  
+
+                    z3_solver.pop(1);
+                    z3_solver.assert(&z3_departure_equality);
+                    
+                    *frequencies[(t as i64 / SCHEDULE_GRANULARITY) as usize].get_mut(&route.name).unwrap() -= 1;
 
                     start_station_mut.train = Some(curr_train_id);
                     if t >= 0 {
@@ -523,8 +641,6 @@ impl Simulator {
                     self.curr_train_counts[id.0 as usize] += 1;
                 }
             }
-
-            println!("Iteration: {t}, train count: {}", self.trains.len());
 
             let mut curr_train_positions = Vec::new();
             for (id, train) in &self.trains {
@@ -545,22 +661,22 @@ impl Simulator {
             t += 1;
         }
 
-        SimulationResults {
+        Some(SimulationResults {
             train_positions,
             train_to_route,
             station_statistics: self
                 .stations
-                .into_iter()
+                .iter()
                 .map(|(id, s)| {
                     (
-                        id,
+                        *id,
                         StationStatistic {
-                            arrival_times: s.arrival_times,
+                            arrival_times: s.arrival_times.clone(),
                         },
                     )
                 })
                 .collect(),
-        }
+        })
     }
 }
 
@@ -569,40 +685,60 @@ impl Simulator {
 fn terminal_nodes(graph: &SubwayMap) -> Vec<NodeIndex> {
     graph
         .node_indices()
-        .filter(|&node| graph.neighbors_directed(node, Direction::Outgoing).count() == 0)
+        .filter(|&node| graph.edges_directed(node, Direction::Outgoing).filter(|e| e.weight().ty == EdgeType::Track).count() == 0)
         .collect()
 }
 
-struct Trip {
-    start: NodeIndex,
-    end: NodeIndex,
-    count: usize,
+pub struct Trip {
+    pub start: NodeIndex,
+    pub end: NodeIndex,
+    pub count: usize,
 }
 
 // All desired trips at a given time. TODO is this the nicest data layout? 
-type TripData = HashMap<i64, Vec<Trip>>;
+pub type TripData = HashMap<i64, Vec<Trip>>;
 // A map from route ids to scheduled times for the trains to depart
 type Schedule = HashMap<String, Vec<i64>>;
 
-const SCHEDULE_GRANULARITY: i64 = 30;
-const SCHEDULE_PERIOD: i64 = 240;
+pub const SCHEDULE_GRANULARITY: i64 = 30;
+pub const SCHEDULE_PERIOD: i64 = 120;
 
 type Frequencies = Vec<HashMap<String, Cell<i64>>>;
 
 
-fn optimize(subway_map: SubwayMap, routes: HashMap<String, Route>, trip_data: &TripData) -> Schedule {
+pub fn optimize(subway_map: SubwayMap, routes: HashMap<String, Route>, trip_data: &TripData) -> (Schedule, Option<SimulationResults>) {
     let mut frequencies: Frequencies  = Vec::with_capacity((SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) as usize);
+    for _ in 0..(SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) {
+        let mut map = HashMap::with_capacity(routes.len());
+        for route in routes.keys() {
+            map.insert(route.clone(), Cell::new(1));
+        }
+        frequencies.push(map);
+
+    }
     // blacklisted time + route combos that should no longer be considered because they make performance worse
     let mut blacklisted_fragments = HashSet::new();
     
-    let mut curr_cost = f64::INFINITY;
+    let mut curr_cost = f64::MAX;
+
     let mut curr_schedule = Schedule::new();
+    for route in routes.keys() {
+        curr_schedule.insert(route.clone(), vec![1; (SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) as usize]);
+    }
+    
+    let mut curr_simulation_results = None;
     
     let mut search_map = generate_shortest_path_search_map(&subway_map, &routes);
     
+    let mut routes_vec = Vec::with_capacity(routes.len());
+    for route in routes.values() {
+        routes_vec.push(route.clone());
+    }
+    let mut simulator = Simulator::new(subway_map, routes_vec);
+    
     loop {
         let mut best_fragment = None;
-        let mut lowest_cost = f32::INFINITY;
+        let mut lowest_cost = f64::INFINITY;
         
         for (time, route_frequencies) in frequencies.iter().enumerate() {
             for (id, frequency) in route_frequencies.iter() {
@@ -611,7 +747,6 @@ fn optimize(subway_map: SubwayMap, routes: HashMap<String, Route>, trip_data: &T
                 }
                 frequency.set(frequency.get() + 1);
                 // calculate cost if frequency goes up by increment of 1
-                // TODO replace dummy cost value
                 let estimated_cost = calculate_costs(&mut search_map, &frequencies, &routes, trip_data);
                 if estimated_cost < lowest_cost {
                     lowest_cost = estimated_cost;
@@ -623,15 +758,23 @@ fn optimize(subway_map: SubwayMap, routes: HashMap<String, Route>, trip_data: &T
         
         let best_fragment = match best_fragment {
             Some(best_fragment) => best_fragment,
-            None => return curr_schedule,
+            None => {
+                println!("Found with cost: {lowest_cost}");
+                return (curr_schedule, curr_simulation_results);
+            }
         };
         
+        println!("Found best fragment: {:?}", best_fragment);
+        
         *frequencies[best_fragment.0].get_mut(&best_fragment.1).unwrap().get_mut() += 1;
-        // run_simulation
-        // todo get correct cost
-        let cost = 100.0;
+        curr_simulation_results = simulator.hyper_hacky_schedule_trains(SCHEDULE_PERIOD as i32, &frequencies);
+        simulator.reset();
+
+        // TODO should we get an actual cost estimate here? 
+        let cost = if curr_simulation_results.is_some() { lowest_cost } else {f64::INFINITY};
         if cost < curr_cost {
             curr_cost = cost;
+            curr_schedule.get_mut(&best_fragment.1).unwrap()[best_fragment.0] += 1;
         } else {
             *frequencies[best_fragment.0].get_mut(&best_fragment.1).unwrap().get_mut() -= 1;
             blacklisted_fragments.insert(best_fragment);
@@ -838,10 +981,10 @@ fn search_to_routes(search_map: &SearchMap, costs: &HashMap<NodeIndex, (u16, Opt
     paths
 }
 
-const WALK_MULTIPLIER: f32 = 1.0;
-const WAIT_MULTIPLIER: f32 = 1.0;
+const WALK_MULTIPLIER: f64 = 1.0;
+const WAIT_MULTIPLIER: f64 = 1.0;
 
-fn calculate_costs(search_map: &mut SearchMap, frequencies: &[HashMap<String, Cell<i64>>], routes: &HashMap<String, Route>, trip_data: &TripData) -> f32 {
+fn calculate_costs(search_map: &mut SearchMap, frequencies: &[HashMap<String, Cell<i64>>], routes: &HashMap<String, Route>, trip_data: &TripData) -> f64 {
     let mut total_cost = 0.;
     for (time, trips) in trip_data.iter() {
         for trip in trips {
@@ -849,29 +992,36 @@ fn calculate_costs(search_map: &mut SearchMap, frequencies: &[HashMap<String, Ce
             // TODO cache this information?
             let paths = shortest_paths(trip.start, trip.end, search_map, 1);
             assert!(!paths.is_empty());
-            let mut lowest_cost = f32::INFINITY;
-            for (i, path) in paths.iter().enumerate() {
-                let mut curr_time = *time as f32;
+            let mut lowest_cost = f64::INFINITY;
+            'path:
+            for path in paths.iter() {
+                let mut curr_time = *time as f64;
                 let mut cost = 0.;
                 for segment in path {
                     let curr_schedule = curr_time as i64 / SCHEDULE_GRANULARITY;
+                    // if the journey runs overtime don't consider it
+                    if curr_schedule as usize >= frequencies.len() {
+                        continue 'path;
+                    } 
                     let mut total_frequency = 0;
                     for route in &segment.routes {
                         total_frequency += frequencies[curr_schedule as usize][route].get();
                     }
-                    let wait = SCHEDULE_GRANULARITY as f32 / total_frequency as f32 * WAIT_MULTIPLIER;
-                    let total_segment_cost = segment.cost as f32 + wait;
+                    let wait = SCHEDULE_GRANULARITY as f64 / total_frequency as f64 * WAIT_MULTIPLIER;
+                    let total_segment_cost = segment.cost as f64 + wait;
                     cost += total_segment_cost;
                     curr_time += total_segment_cost;
                     if let Some(edge_idx) = segment.edge_to_next {
-                        let walk_time = search_map.map[edge_idx].weight as f32 * WALK_MULTIPLIER;
+                        let walk_time = search_map.map.edge_weight(edge_idx).map(|e| e.weight).unwrap_or_default() as f64 * WALK_MULTIPLIER;
                         cost += walk_time;
                         curr_time += walk_time;
                     }
                 }
                 lowest_cost = lowest_cost.min(cost);
             }
-            total_cost += lowest_cost * trip.count as f32;
+            if lowest_cost < f64::INFINITY {
+                total_cost += lowest_cost * trip.count as f64;
+            }
         }
     }
     total_cost

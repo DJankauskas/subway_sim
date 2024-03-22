@@ -4,7 +4,8 @@
 mod simulator;
 mod shortest_path;
 
-use simulator::{generate_shortest_path_search_map, shortest_paths, Route, Simulator, SubwayMap, TrackStationId};
+use petgraph::algo::{has_path_connecting, DfsSpace};
+use simulator::{generate_shortest_path_search_map, optimize, shortest_paths, Route, SimulationResults, Simulator, SubwayMap, TrackStationId, SCHEDULE_PERIOD};
 
 use std::collections::{HashMap, HashSet};
 
@@ -12,6 +13,12 @@ use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use petgraph::{Direction, Graph};
 use serde::{Deserialize, Serialize};
+
+use rand::{Rng, SeedableRng};
+use rand::rngs::StdRng;
+use rand::seq::IteratorRandom;
+
+use crate::simulator::{Trip, TripData, SCHEDULE_GRANULARITY};
 
 #[derive(Deserialize, Serialize, Clone, Hash, PartialEq, Eq)]
 struct JsNode {
@@ -172,19 +179,7 @@ fn js_routes_to_routes(js_routes: JsRoutes, subway_map: &SubwayMap, cytoscape_id
     (routes, route_id_map)
 }
 
-#[tauri::command]
-async fn run_simulation(
-    js_graph: JsGraph,
-    js_routes: JsRoutes,
-    frequency: u64
-) -> Result<JsSimulationResults, String> {
-    eprintln!("start running simulation");
-    let (subway_map, cytoscape_id_map, petgraph_map) = js_graph_to_subway_map(js_graph.clone());
-    
-    let (routes, route_id_map) = js_routes_to_routes(js_routes, &subway_map, &cytoscape_id_map);
-    
-    let simulator = Simulator::new(subway_map, routes.clone());
-    let simulation_results = simulator.run(60, frequency);
+fn simulation_results_to_js(simulation_results: SimulationResults, petgraph_map: &HashMap<TrackStationId, String>, route_id_map: &[String]) -> JsSimulationResults {
     let train_positions: Vec<_> = simulation_results
         .train_positions
         .into_iter()
@@ -233,11 +228,67 @@ async fn run_simulation(
         })
         .collect();
 
-    Ok(JsSimulationResults {
+    JsSimulationResults {
         train_positions,
         train_to_route,
         station_statistics,
-    })
+    }
+}
+
+#[tauri::command]
+async fn run_simulation(
+    js_graph: JsGraph,
+    js_routes: JsRoutes,
+    frequency: u64
+) -> Result<JsSimulationResults, String> {
+    let (subway_map, cytoscape_id_map, petgraph_map) = js_graph_to_subway_map(js_graph.clone());
+    let (routes, route_id_map) = js_routes_to_routes(js_routes, &subway_map, &cytoscape_id_map);
+    
+    let simulator = Simulator::new(subway_map, routes.clone());
+    let simulation_results = simulator.run(60, frequency);
+    Ok(simulation_results_to_js(simulation_results, &petgraph_map, &route_id_map))
+}
+
+#[tauri::command]
+async fn run_optimize(
+    js_graph: JsGraph,
+    js_routes: JsRoutes,
+) -> Result<JsSimulationResults, String> {
+    let (subway_map, cytoscape_id_map, petgraph_map) = js_graph_to_subway_map(js_graph.clone());
+    let (routes, route_id_map) = js_routes_to_routes(js_routes, &subway_map, &cytoscape_id_map);
+    
+    let routes = routes.into_iter().map(|r| (r.name.clone(), r)).collect();
+
+    
+    let mut rng = StdRng::seed_from_u64(5050);
+    let mut dfs_space = DfsSpace::new(&subway_map);
+    
+    let mut trip_data = TripData::new();
+    
+    for _ in 0..25 {
+        let start = subway_map.node_indices().choose(&mut rng).unwrap();
+        let end = subway_map.node_indices().choose(&mut rng).unwrap();
+        
+        if has_path_connecting(&subway_map, start, end, Some(&mut dfs_space)) {
+            let trip = Trip {
+                start,
+                end,
+                count: 1,
+            };
+            trip_data.entry(rng.gen_range(0..SCHEDULE_PERIOD - SCHEDULE_GRANULARITY)).or_default().push(trip);
+        }
+    }
+
+    
+    // TODO use actual trip data. where to source it from?
+    let (schedule, simulation_results) = optimize(subway_map, routes, &trip_data);
+    
+    
+    println!("Found schedule: {:#?}", schedule);
+    
+    // TODO handle error condition
+    let simulation_results = simulation_results.unwrap();
+    Ok(simulation_results_to_js(simulation_results, &petgraph_map, &route_id_map))
 }
 
 #[derive(Serialize)]
@@ -279,7 +330,7 @@ struct JsSimulationResults {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![run_simulation, shortest_path])
+        .invoke_handler(tauri::generate_handler![run_simulation, shortest_path, run_optimize])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
