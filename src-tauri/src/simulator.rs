@@ -22,7 +22,7 @@ pub struct TrainId {
 }
 
 impl TrainId {
-    fn to_z3_arrival(self, ctx: &z3::Context) -> z3::ast::Int {
+    fn to_z3_departure(self, ctx: &z3::Context) -> z3::ast::Int {
         z3::ast::Int::new_const(ctx, format!("{}_{}", self.route_idx, self.count))
     }
 }
@@ -569,14 +569,14 @@ impl Simulator {
                                         z3_solver.pop(num_states_removed as u32);
                                         // encode conflict
                                         let conflicting_train_scheduled_at = conflicting_train
-                                            .to_z3_arrival(&z3_context)
+                                            .to_z3_departure(&z3_context)
                                             ._eq(&z3::ast::Int::from_i64(
                                                 &z3_context,
                                                 train_scheduled_at[&conflicting_train] as i64,
                                             ));
                                         let assertion = conflicting_train_scheduled_at.implies(
                                             &curr_train_id
-                                                .to_z3_arrival(&z3_context)
+                                                .to_z3_departure(&z3_context)
                                                 ._eq(&z3::ast::Int::from_i64(
                                                     &z3_context,
                                                     scheduled_at as i64,
@@ -630,7 +630,7 @@ impl Simulator {
                     //   but otherwise do pop and push logic. a nice thing to assert then pop is depart_var = (or >=) curr time
                     //   however when backtracking this could of course get invalidated, or could it? think about this
 
-                    let curr_train_z3 = curr_train_id.to_z3_arrival(&z3_context);
+                    let curr_train_z3 = curr_train_id.to_z3_departure(&z3_context);
                     let curr_time_z3 = z3::ast::Int::from_i64(&z3_context, t.into());
 
                     z3_solver.push();
