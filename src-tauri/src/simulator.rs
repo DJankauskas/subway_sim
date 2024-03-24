@@ -184,7 +184,7 @@ impl Simulator {
             traversal_order,
         }
     }
-    
+
     fn reset(&mut self) {
         self.trains.clear();
         self.curr_train_counts = vec![0; self.routes.len()];
@@ -329,14 +329,16 @@ impl Simulator {
                 }
             }
 
-            // TODO: replace with actual scheduling data
             for (id, route) in &self.routes {
                 if (t - route.offset as i32) % (frequency as i32) != 0 {
                     continue;
                 }
                 let start_station_mut = self.stations.get_mut(&route.start_station).unwrap();
                 // TODO: do I need to handle the case where this is not true?
-                let curr_train_id = TrainId{ route_idx: id.0, count: self.curr_train_counts[id.0 as usize] } ;
+                let curr_train_id = TrainId {
+                    route_idx: id.0,
+                    count: self.curr_train_counts[id.0 as usize],
+                };
                 if start_station_mut.train.is_none() {
                     let train = Train {
                         id: curr_train_id,
@@ -398,22 +400,24 @@ impl Simulator {
                 .collect(),
         }
     }
-    
-    
+
     // This is mostly a copy paste of the run function right now.
-    // TODO figure out how to consolidate code with run 
-    pub fn hyper_hacky_schedule_trains(&mut self, iterations: i32, desired_frequencies: &Frequencies) -> Option<SimulationResults> {
+    // TODO figure out how to consolidate code with run
+    pub fn hyper_hacky_schedule_trains(
+        &mut self,
+        iterations: i32,
+        desired_frequencies: &Frequencies,
+    ) -> Option<SimulationResults> {
         // use z3 SMT to calculate train position bounds
         // details: each train is scheduled to depart at an integer time.
         // the ith train for route r has a variable called r_i
-        // we get train departure times from z3. Any time we observe a conflict, we 
-        // add a rule probibiting the cause of the conflict, then jump back in time before the 
-        // conflict occurred. TODO to when exactly do we jump? Is there a way of being eager so that we can always jump back to an 
-        // easy time?
+        // we get train departure times from z3. Any time we observe a conflict, we
+        // add a rule probibiting the cause of the conflict, then jump back in time before the
+        // conflict occurred.
         let z3_config = z3::Config::new();
         let z3_context = z3::Context::new(&z3_config);
         let z3_solver = z3::Solver::new(&z3_context);
-        
+
         let mut frequencies = Vec::with_capacity(desired_frequencies.len());
         for period in desired_frequencies {
             let mut map = HashMap::with_capacity(period.len());
@@ -422,9 +426,9 @@ impl Simulator {
             }
             frequencies.push(map);
         }
-        
-        // initialize ground rules for all departure variables. Specifically, 
-        // r_i+1 > r_i, and depending on frequencies set time bounds: 
+
+        // initialize ground rules for all departure variables. Specifically,
+        // r_i+1 > r_i, and depending on frequencies set time bounds:
         // r_0 >= 0 and r_0 < SCHEDULE_GRANULARITY must always be true
 
         for (id, route) in self.routes.iter() {
@@ -432,10 +436,14 @@ impl Simulator {
             let mut curr_idx = 0;
             for freq in &frequencies {
                 let end_time = start_time + SCHEDULE_GRANULARITY;
-                
+
                 for i in 0..freq[&route.name] {
-                    let var = z3::ast::Int::new_const(&z3_context, format!("{}_{}", id.0, i+curr_idx));
-                    let next_var = z3::ast::Int::new_const(&z3_context, format!("{}_{}", id.0, i+curr_idx+1));
+                    let var =
+                        z3::ast::Int::new_const(&z3_context, format!("{}_{}", id.0, i + curr_idx));
+                    let next_var = z3::ast::Int::new_const(
+                        &z3_context,
+                        format!("{}_{}", id.0, i + curr_idx + 1),
+                    );
                     z3_solver.assert(&var.lt(&next_var));
                     z3_solver.assert(&var.ge(&z3::ast::Int::from_i64(&z3_context, start_time)));
                     z3_solver.assert(&var.lt(&z3::ast::Int::from_i64(&z3_context, end_time)));
@@ -445,21 +453,20 @@ impl Simulator {
                 curr_idx += freq[&route.name];
             }
         }
-        
+
         let mut train_to_route = HashMap::new();
         let traversal_order = self.traversal_order.clone();
 
         let mut train_positions = Vec::new();
 
         let mut t = 0;
-        
+
         let mut train_scheduled_at = HashMap::new();
         let mut states = Vec::with_capacity(iterations as usize);
-        
+
         let mut permanent_assertions = Vec::new();
 
-        'iteration:
-        while t < iterations {
+        'iteration: while t < iterations {
             states.push((self.clone(), frequencies.clone()));
             z3_solver.push();
 
@@ -538,30 +545,44 @@ impl Simulator {
                                     }
                                     Some(conflicting_train) => {
                                         // MERGE CONFLICT
-                                        // todo random chance of allowing the merge conflict instead, and 
+                                        // todo random chance of allowing the merge conflict instead, and
                                         // continuing
                                         let scheduled_at = train_scheduled_at[&curr_train_id];
                                         t = scheduled_at;
-                                        let num_states_removed = states.len() - scheduled_at as usize;
-                                        states.drain(scheduled_at as usize+1..);
+                                        let num_states_removed =
+                                            states.len() - scheduled_at as usize;
+                                        states.drain(scheduled_at as usize + 1..);
                                         let prev_state = states.pop().unwrap();
 
                                         *self = prev_state.0;
                                         frequencies = prev_state.1;
 
-                                        train_positions.retain(|p: &TrainPositions| (p.time as i32) < scheduled_at);
+                                        train_positions.retain(|p: &TrainPositions| {
+                                            (p.time as i32) < scheduled_at
+                                        });
                                         // todo quadratic performance, FIXME
                                         for assertion in &permanent_assertions {
                                             z3_solver.assert(assertion);
                                         }
-                                
+
                                         // restore solver state to the iteration we're returning to
-                                        // TODO is this actually necessary? does this preserve too little
-                                        // information? 
                                         z3_solver.pop(num_states_removed as u32);
                                         // encode conflict
-                                        let conflicting_train_scheduled_at = conflicting_train.to_z3_arrival(&z3_context)._eq(&z3::ast::Int::from_i64(&z3_context, train_scheduled_at[&conflicting_train] as i64));
-                                        let assertion = conflicting_train_scheduled_at.implies(&curr_train_id.to_z3_arrival(&z3_context)._eq(&z3::ast::Int::from_i64(&z3_context, scheduled_at as i64)).not());
+                                        let conflicting_train_scheduled_at = conflicting_train
+                                            .to_z3_arrival(&z3_context)
+                                            ._eq(&z3::ast::Int::from_i64(
+                                                &z3_context,
+                                                train_scheduled_at[&conflicting_train] as i64,
+                                            ));
+                                        let assertion = conflicting_train_scheduled_at.implies(
+                                            &curr_train_id
+                                                .to_z3_arrival(&z3_context)
+                                                ._eq(&z3::ast::Int::from_i64(
+                                                    &z3_context,
+                                                    scheduled_at as i64,
+                                                ))
+                                                .not(),
+                                        );
                                         z3_solver.assert(&assertion);
                                         permanent_assertions.push(assertion);
 
@@ -577,12 +598,14 @@ impl Simulator {
                 }
             }
 
-            // TODO: replace with actual scheduling data
             for (id, route) in &self.routes {
                 let start_station_mut = self.stations.get_mut(&route.start_station).unwrap();
                 // TODO: do I need to handle the case where this is not true?
-                let curr_train_id = TrainId { route_idx: id.0, count: self.curr_train_counts[id.0 as usize] };
-                
+                let curr_train_id = TrainId {
+                    route_idx: id.0,
+                    count: self.curr_train_counts[id.0 as usize],
+                };
+
                 if frequencies[(t as i64 / SCHEDULE_GRANULARITY) as usize][&route.name] == 0 {
                     continue;
                 }
@@ -597,22 +620,24 @@ impl Simulator {
                     };
 
                     // logic to handle when trying to schedule trains:
-                    // - should we wait if there's currently a train too close on the directly proceeding 
+                    // - should we wait if there's currently a train too close on the directly proceeding
                     //   track? right now, will say no, but otherwise this would be the first check
                     // - check if we've failed frequency requirements for last bin. if yes, report fail
-                    // - add an assertion to solver saying current train departure = time. if we get a sat 
-                    //   model, proceed. otherwise, don't schedule a train 
+                    // - add an assertion to solver saying current train departure = time. if we get a sat
+                    //   model, proceed. otherwise, don't schedule a train
                     // - the difficult thing to figure out is: what assertions can we keep permanently,
                     //   and what can we get rid of? would be nice if we could maintain a list of permanent assumptions
                     //   but otherwise do pop and push logic. a nice thing to assert then pop is depart_var = (or >=) curr time
                     //   however when backtracking this could of course get invalidated, or could it? think about this
-                    
+
                     let curr_train_z3 = curr_train_id.to_z3_arrival(&z3_context);
                     let curr_time_z3 = z3::ast::Int::from_i64(&z3_context, t.into());
-                    
+
                     z3_solver.push();
-                    if z3_solver.check_assumptions(&[curr_train_z3.ge(&curr_time_z3)]) != z3::SatResult::Sat {
-                        // TODO is this ever recoverable?
+                    if z3_solver.check_assumptions(&[curr_train_z3.ge(&curr_time_z3)])
+                        != z3::SatResult::Sat
+                    {
+                        // TODO attempt to allow a merge later? requires complex pruning of assertions
                         return None;
                     }
                     let z3_departure_equality = curr_train_z3._eq(&curr_time_z3);
@@ -620,12 +645,14 @@ impl Simulator {
                     if z3_solver.check_assumptions(&[]) != z3::SatResult::Sat {
                         z3_solver.pop(1);
                         continue;
-                    }  
+                    }
 
                     z3_solver.pop(1);
                     z3_solver.assert(&z3_departure_equality);
-                    
-                    *frequencies[(t as i64 / SCHEDULE_GRANULARITY) as usize].get_mut(&route.name).unwrap() -= 1;
+
+                    *frequencies[(t as i64 / SCHEDULE_GRANULARITY) as usize]
+                        .get_mut(&route.name)
+                        .unwrap() -= 1;
 
                     start_station_mut.train = Some(curr_train_id);
                     if t >= 0 {
@@ -681,11 +708,16 @@ impl Simulator {
 }
 
 /// Gets all nodes that have no out edges
-/// TODO: customize so it ignores walk edges
 fn terminal_nodes(graph: &SubwayMap) -> Vec<NodeIndex> {
     graph
         .node_indices()
-        .filter(|&node| graph.edges_directed(node, Direction::Outgoing).filter(|e| e.weight().ty == EdgeType::Track).count() == 0)
+        .filter(|&node| {
+            graph
+                .edges_directed(node, Direction::Outgoing)
+                .filter(|e| e.weight().ty == EdgeType::Track)
+                .count()
+                == 0
+        })
         .collect()
 }
 
@@ -695,7 +727,6 @@ pub struct Trip {
     pub count: usize,
 }
 
-// All desired trips at a given time. TODO is this the nicest data layout? 
 pub type TripData = HashMap<i64, Vec<Trip>>;
 // A map from route ids to scheduled times for the trains to depart
 type Schedule = HashMap<String, Vec<i64>>;
@@ -705,49 +736,58 @@ pub const SCHEDULE_PERIOD: i64 = 120;
 
 type Frequencies = Vec<HashMap<String, Cell<i64>>>;
 
-
-pub fn optimize(subway_map: SubwayMap, routes: HashMap<String, Route>, trip_data: &TripData) -> (Schedule, Option<SimulationResults>) {
-    let mut frequencies: Frequencies  = Vec::with_capacity((SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) as usize);
+pub fn optimize(
+    subway_map: SubwayMap,
+    routes: HashMap<String, Route>,
+    trip_data: &TripData,
+) -> (Schedule, Option<SimulationResults>) {
+    let mut frequencies: Frequencies =
+        Vec::with_capacity((SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) as usize);
     for _ in 0..(SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) {
         let mut map = HashMap::with_capacity(routes.len());
         for route in routes.keys() {
             map.insert(route.clone(), Cell::new(1));
         }
         frequencies.push(map);
-
     }
     // blacklisted time + route combos that should no longer be considered because they make performance worse
     let mut blacklisted_fragments = HashSet::new();
-    
+
     let mut curr_cost = f64::MAX;
 
     let mut curr_schedule = Schedule::new();
     for route in routes.keys() {
-        curr_schedule.insert(route.clone(), vec![1; (SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) as usize]);
+        curr_schedule.insert(
+            route.clone(),
+            vec![1; (SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) as usize],
+        );
     }
-    
+
     let mut curr_simulation_results = None;
-    
+
     let mut search_map = generate_shortest_path_search_map(&subway_map, &routes);
-    
+
     let mut routes_vec = Vec::with_capacity(routes.len());
     for route in routes.values() {
         routes_vec.push(route.clone());
     }
     let mut simulator = Simulator::new(subway_map, routes_vec);
-    
+
     loop {
         let mut best_fragment = None;
         let mut lowest_cost = f64::INFINITY;
-        
+
         for (time, route_frequencies) in frequencies.iter().enumerate() {
             for (id, frequency) in route_frequencies.iter() {
-                if blacklisted_fragments.contains(&(time, id.clone())) || frequency.get() >= SCHEDULE_GRANULARITY {
+                if blacklisted_fragments.contains(&(time, id.clone()))
+                    || frequency.get() >= SCHEDULE_GRANULARITY
+                {
                     continue;
                 }
                 frequency.set(frequency.get() + 1);
                 // calculate cost if frequency goes up by increment of 1
-                let estimated_cost = calculate_costs(&mut search_map, &frequencies, &routes, trip_data);
+                let estimated_cost =
+                    calculate_costs(&mut search_map, &frequencies, &routes, trip_data);
                 if estimated_cost < lowest_cost {
                     lowest_cost = estimated_cost;
                     best_fragment = Some((time, id.clone()));
@@ -755,7 +795,7 @@ pub fn optimize(subway_map: SubwayMap, routes: HashMap<String, Route>, trip_data
                 frequency.set(frequency.get() - 1);
             }
         }
-        
+
         let best_fragment = match best_fragment {
             Some(best_fragment) => best_fragment,
             None => {
@@ -763,32 +803,42 @@ pub fn optimize(subway_map: SubwayMap, routes: HashMap<String, Route>, trip_data
                 return (curr_schedule, curr_simulation_results);
             }
         };
-        
+
         println!("Found best fragment: {:?}", best_fragment);
-        
-        *frequencies[best_fragment.0].get_mut(&best_fragment.1).unwrap().get_mut() += 1;
-        curr_simulation_results = simulator.hyper_hacky_schedule_trains(SCHEDULE_PERIOD as i32, &frequencies);
+
+        *frequencies[best_fragment.0]
+            .get_mut(&best_fragment.1)
+            .unwrap()
+            .get_mut() += 1;
+        curr_simulation_results =
+            simulator.hyper_hacky_schedule_trains(SCHEDULE_PERIOD as i32, &frequencies);
         simulator.reset();
 
-        // TODO should we get an actual cost estimate here? 
-        let cost = if curr_simulation_results.is_some() { lowest_cost } else {f64::INFINITY};
+        // TODO should we get an actual cost estimate here?
+        let cost = if curr_simulation_results.is_some() {
+            lowest_cost
+        } else {
+            f64::INFINITY
+        };
         if cost < curr_cost {
             curr_cost = cost;
             curr_schedule.get_mut(&best_fragment.1).unwrap()[best_fragment.0] += 1;
         } else {
-            *frequencies[best_fragment.0].get_mut(&best_fragment.1).unwrap().get_mut() -= 1;
+            *frequencies[best_fragment.0]
+                .get_mut(&best_fragment.1)
+                .unwrap()
+                .get_mut() -= 1;
             blacklisted_fragments.insert(best_fragment);
         }
     }
 }
 
-// for search, modify graph? what we could do is duplicate each node and edge per route. then if 
-// a route is no longer helpful for us, we dip 
+// for search, modify graph? what we could do is duplicate each node and edge per route. then if
+// a route is no longer helpful for us, we dip
 
 // generate modified map for use in shortest routes search
-// creates a map where each route has its own nodes and edges; if two routes share the same 
-// nodes and edges, walk nodes of cost 0 connect them 
-
+// creates a map where each route has its own nodes and edges; if two routes share the same
+// nodes and edges, walk nodes of cost 0 connect them
 
 #[derive(PartialEq, Eq, Hash)]
 pub struct SearchNode {
@@ -806,51 +856,67 @@ pub struct SearchMap {
 }
 
 // Maps a subway map to a form that is more amenable to searching for best routes.
-// Each route is given its own nodes and edges, but if multiple routes share nodes in the actual 
-// map, they will be connected with walk edges. 
-pub fn generate_shortest_path_search_map(subway_map: &SubwayMap, routes: &HashMap<String, Route>) -> SearchMap {
-    let mut search_map  = SearchGraph::new();
+// Each route is given its own nodes and edges, but if multiple routes share nodes in the actual
+// map, they will be connected with walk edges.
+pub fn generate_shortest_path_search_map(
+    subway_map: &SubwayMap,
+    routes: &HashMap<String, Route>,
+) -> SearchMap {
+    let mut search_map = SearchGraph::new();
     let mut old_to_new_nodes = HashMap::new();
     let mut old_to_new_edges = HashMap::new();
     let mut new_to_old_edges = HashMap::new();
-    
+
     let mut route_old_to_new_nodes = HashMap::new();
-    
+
     // For each route create nodes and edges for it
     for (key, route) in routes.iter() {
         let mut create_node = |old_node: NodeIndex, search_map: &mut SearchGraph| -> NodeIndex {
             match route_old_to_new_nodes.get(&(key, old_node)) {
                 Some(node) => *node,
                 None => {
-                let new_nodes = old_to_new_nodes.entry(old_node).or_insert(Vec::new());
-                let route_node = search_map.add_node(SearchNode { route: key.clone(), old_node });
-                new_nodes.push(route_node);
-                route_old_to_new_nodes.insert((key, old_node), route_node);
-                route_node
+                    let new_nodes = old_to_new_nodes.entry(old_node).or_insert(Vec::new());
+                    let route_node = search_map.add_node(SearchNode {
+                        route: key.clone(),
+                        old_node,
+                    });
+                    new_nodes.push(route_node);
+                    route_old_to_new_nodes.insert((key, old_node), route_node);
+                    route_node
                 }
-            } 
+            }
         };
-        
+
         for edge in route.station_to.values() {
             let (start, end) = subway_map.edge_endpoints(*edge).unwrap();
             let new_start_node = create_node(start, &mut search_map);
             let new_end_node = create_node(end, &mut search_map);
             let new_edge = search_map.add_edge(new_start_node, new_end_node, subway_map[*edge]);
-            old_to_new_edges.entry(*edge).or_insert(Vec::new()).push(new_edge);
+            old_to_new_edges
+                .entry(*edge)
+                .or_insert(Vec::new())
+                .push(new_edge);
             new_to_old_edges.insert(new_edge, *edge);
         }
     }
-    
-    // Connect virtual nodes that correspond to the same station together with walk edges. This 
+
+    // Connect virtual nodes that correspond to the same station together with walk edges. This
     // represents the transfer necessary to move between routes
     for related_nodes in old_to_new_nodes.values() {
-        for i in 0..related_nodes.len()-1 {
-            for j in i+1..related_nodes.len() {
-                search_map.add_edge(related_nodes[i], related_nodes[j], Edge { ty: crate::EdgeType::Walk, weight: 1 });
+        for i in 0..related_nodes.len() - 1 {
+            for j in i + 1..related_nodes.len() {
+                search_map.add_edge(
+                    related_nodes[i],
+                    related_nodes[j],
+                    Edge {
+                        ty: crate::EdgeType::Walk,
+                        weight: 1,
+                    },
+                );
             }
         }
     }
-    
+
     // Create corresponding walk edges for those found on the original graph
     for edge in subway_map.edge_references() {
         if let EdgeType::Walk = edge.weight().ty {
@@ -866,56 +932,85 @@ pub fn generate_shortest_path_search_map(subway_map: &SubwayMap, routes: &HashMa
             // Is this too aggressive? Can we just create one edge instead?
             for node1 in new_nodes1 {
                 for node2 in new_nodes2 {
-                    search_map.add_edge(*node1,*node2, *edge.weight());
+                    search_map.add_edge(*node1, *node2, *edge.weight());
                 }
             }
         }
     }
-    
-    SearchMap { map: search_map, old_to_new_nodes, old_to_new_edges, new_to_old_edges }
+
+    SearchMap {
+        map: search_map,
+        old_to_new_nodes,
+        old_to_new_edges,
+        new_to_old_edges,
+    }
 }
 
 // Finds the k shortest paths between the start and end nodes.
-// Note that start and end must be old nodes. 
+// Note that start and end must be old nodes.
 // things to think about here
 // - shortest paths need to take routes into account: even if track is physically connected,
 // it doesn't mean there's a route that actually is able to go through the entire physical connection
 // - if part of route a to d goes through b to c, we can take any route that goes on those
-// and add their frequency to reduce travel times 
+// and add their frequency to reduce travel times
 // NOTE: this tactic only works if there aren't cases where routes X and Y share tracks, diverge,
 // then merge back together. this can be problematic as the section where they diverge may have varying
 // speeds, eg express vs local service. This can be seen with D and rush hour B service, where the lines
-// reconnect in the Bronx. For now the B service will always terminate earlier than this point. TODO
-// lift this limitation?
-pub fn shortest_paths(start: NodeIndex, end: NodeIndex, search_map: &mut SearchMap, mut k: usize) -> Vec<Vec<RoutePath>> {
+// reconnect in the Bronx. For now the B service will always terminate earlier than this point.
+pub fn shortest_paths(
+    start: NodeIndex,
+    end: NodeIndex,
+    search_map: &mut SearchMap,
+    mut k: usize,
+) -> Vec<Vec<RoutePath>> {
     assert!(k >= 1);
-    let valid_end_nodes: HashSet<_> = search_map.old_to_new_nodes[&end].clone().into_iter().collect();
-    
+    let valid_end_nodes: HashSet<_> = search_map.old_to_new_nodes[&end]
+        .clone()
+        .into_iter()
+        .collect();
+
     let start_nodes = &search_map.old_to_new_nodes[&start];
 
     // create virtual node + edges to represent start of search
     // note that route and old nodeindex are invalid for virtual node
-    let virtual_start_node = search_map.map.add_node(SearchNode { route: String::new(), old_node: NodeIndex::new(0) });
+    let virtual_start_node = search_map.map.add_node(SearchNode {
+        route: String::new(),
+        old_node: NodeIndex::new(0),
+    });
 
     for start_node in start_nodes {
-        search_map.map.add_edge(virtual_start_node, *start_node, Edge { ty: EdgeType::Walk, weight: 0 });
+        search_map.map.add_edge(
+            virtual_start_node,
+            *start_node,
+            Edge {
+                ty: EdgeType::Walk,
+                weight: 0,
+            },
+        );
     }
-    
+
     // TODO: should we consider route frequencies in this calculation? pass that data here if yes
-    let (costs, destination) = dijkstra(&search_map.map, virtual_start_node, &valid_end_nodes, |edge| edge.weight().weight);
+    let (costs, destination) = dijkstra(
+        &search_map.map,
+        virtual_start_node,
+        &valid_end_nodes,
+        |edge| edge.weight().weight,
+    );
     let destination = match destination {
-        Terminated::Exhaustive => panic!("did not encounter the desired destination in shortest path search"),
+        Terminated::Exhaustive => {
+            panic!("did not encounter the desired destination in shortest path search")
+        }
         Terminated::At(destination) => destination,
     };
-    
+
     let routes = search_to_routes(search_map, &costs, destination);
     k -= 1;
-    for route in &routes {
+    for _route in &routes {
         if k == 0 {
             break;
         }
 
-       // TODO calculate more routes by disabling edges 
+        // TODO calculate more routes by disabling edges
 
         k -= 1;
     }
@@ -934,12 +1029,16 @@ pub struct RoutePath {
     edge_to_next: Option<EdgeIndex>,
 }
 
-fn search_to_routes(search_map: &SearchMap, costs: &HashMap<NodeIndex, (u16, Option<EdgeIndex>)>, destination: NodeIndex) -> Vec<RoutePath> {
+fn search_to_routes(
+    search_map: &SearchMap,
+    costs: &HashMap<NodeIndex, (u16, Option<EdgeIndex>)>,
+    destination: NodeIndex,
+) -> Vec<RoutePath> {
     let mut curr_edge = costs[&destination].1.unwrap();
     let mut paths = Vec::new();
-    
+
     // These are updated as we're traversing a current route, and used to get the final route data
-    let mut curr_end_node = search_map.map.edge_endpoints(curr_edge).unwrap().0; 
+    let mut curr_end_node = search_map.map.edge_endpoints(curr_edge).unwrap().0;
     let mut curr_start_node = curr_end_node;
     let mut curr_cost = 0;
     let mut currently_in_segment = false;
@@ -949,16 +1048,27 @@ fn search_to_routes(search_map: &SearchMap, costs: &HashMap<NodeIndex, (u16, Opt
         if edge_ref.ty == EdgeType::Walk {
             if currently_in_segment {
                 let old_start_node = search_map.map[curr_start_node].old_node;
-                let start_routes: HashSet<_> = search_map.old_to_new_nodes[&old_start_node].iter().map(|node| search_map.map[*node].route.clone()).collect();
+                let start_routes: HashSet<_> = search_map.old_to_new_nodes[&old_start_node]
+                    .iter()
+                    .map(|node| search_map.map[*node].route.clone())
+                    .collect();
                 let old_end_node = search_map.map[curr_end_node].old_node;
-                let end_routes: HashSet<_> = search_map.old_to_new_nodes[&old_end_node].iter().map(|node| search_map.map[*node].route.clone()).collect();
+                let end_routes: HashSet<_> = search_map.old_to_new_nodes[&old_end_node]
+                    .iter()
+                    .map(|node| search_map.map[*node].route.clone())
+                    .collect();
                 let routes = HashSet::from_iter(start_routes.intersection(&end_routes).cloned());
-                paths.push(RoutePath { routes, cost: curr_cost, start_node: curr_start_node, end_node: curr_end_node, edge_to_next: Some(curr_edge) });
+                paths.push(RoutePath {
+                    routes,
+                    cost: curr_cost,
+                    start_node: curr_start_node,
+                    end_node: curr_end_node,
+                    edge_to_next: Some(curr_edge),
+                });
                 currently_in_segment = false;
             }
             curr_cost = 0;
-        }
-        else {
+        } else {
             if !currently_in_segment {
                 curr_end_node = search_map.map.edge_endpoints(curr_edge).unwrap().1;
                 currently_in_segment = true;
@@ -975,7 +1085,7 @@ fn search_to_routes(search_map: &SearchMap, costs: &HashMap<NodeIndex, (u16, Opt
                 break;
             }
         };
-    };
+    }
 
     paths.reverse();
     paths
@@ -984,17 +1094,20 @@ fn search_to_routes(search_map: &SearchMap, costs: &HashMap<NodeIndex, (u16, Opt
 const WALK_MULTIPLIER: f64 = 2.0;
 const WAIT_MULTIPLIER: f64 = 2.0;
 
-fn calculate_costs(search_map: &mut SearchMap, frequencies: &[HashMap<String, Cell<i64>>], routes: &HashMap<String, Route>, trip_data: &TripData) -> f64 {
+fn calculate_costs(
+    search_map: &mut SearchMap,
+    frequencies: &[HashMap<String, Cell<i64>>],
+    routes: &HashMap<String, Route>,
+    trip_data: &TripData,
+) -> f64 {
     let mut total_cost = 0.;
     for (time, trips) in trip_data.iter() {
         for trip in trips {
             // TODO do more than one path?
-            // TODO cache this information?
             let paths = shortest_paths(trip.start, trip.end, search_map, 1);
             assert!(!paths.is_empty());
             let mut lowest_cost = f64::INFINITY;
-            'path:
-            for path in paths.iter() {
+            'path: for path in paths.iter() {
                 let mut curr_time = *time as f64;
                 let mut cost = 0.;
                 for segment in path {
@@ -1002,17 +1115,23 @@ fn calculate_costs(search_map: &mut SearchMap, frequencies: &[HashMap<String, Ce
                     // if the journey runs overtime don't consider it
                     if curr_schedule as usize >= frequencies.len() {
                         continue 'path;
-                    } 
+                    }
                     let mut total_frequency = 0;
                     for route in &segment.routes {
                         total_frequency += frequencies[curr_schedule as usize][route].get();
                     }
-                    let wait = SCHEDULE_GRANULARITY as f64 / total_frequency as f64 * WAIT_MULTIPLIER;
+                    let wait =
+                        SCHEDULE_GRANULARITY as f64 / total_frequency as f64 * WAIT_MULTIPLIER;
                     let total_segment_cost = segment.cost as f64 + wait;
                     cost += total_segment_cost;
                     curr_time += total_segment_cost;
                     if let Some(edge_idx) = segment.edge_to_next {
-                        let walk_time = search_map.map.edge_weight(edge_idx).map(|e| e.weight).unwrap_or_default() as f64 * WALK_MULTIPLIER;
+                        let walk_time = search_map
+                            .map
+                            .edge_weight(edge_idx)
+                            .map(|e| e.weight)
+                            .unwrap_or_default() as f64
+                            * WALK_MULTIPLIER;
                         cost += walk_time;
                         curr_time += walk_time;
                     }

@@ -1,11 +1,14 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod simulator;
 mod shortest_path;
+mod simulator;
 
 use petgraph::algo::{has_path_connecting, DfsSpace};
-use simulator::{generate_shortest_path_search_map, optimize, shortest_paths, Route, SimulationResults, Simulator, SubwayMap, TrackStationId, SCHEDULE_PERIOD};
+use simulator::{
+    generate_shortest_path_search_map, optimize, shortest_paths, Route, SimulationResults,
+    Simulator, SubwayMap, TrackStationId, SCHEDULE_PERIOD,
+};
 
 use std::collections::{HashMap, HashSet};
 
@@ -14,9 +17,9 @@ use petgraph::visit::EdgeRef;
 use petgraph::{Direction, Graph};
 use serde::{Deserialize, Serialize};
 
-use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use rand::seq::IteratorRandom;
+use rand::{Rng, SeedableRng};
 
 use crate::simulator::{Trip, TripData, SCHEDULE_GRANULARITY};
 
@@ -107,7 +110,7 @@ fn js_graph_to_subway_map(
             edge.to_edge(),
         );
         petgraph_map.insert(TrackStationId::Track(edge_id), edge.id.clone());
-        
+
         // walk edges are represented as one-way in JsGraph for creation convenience; they must
         // be duplicated in the other direction to represent their two-way nature
         if edge.r#type == "walk" {
@@ -126,15 +129,17 @@ fn js_graph_to_subway_map(
 fn shortest_path(js_graph: JsGraph, js_routes: JsRoutes, source: String, target: String) {
     let (graph, map, _) = js_graph_to_subway_map(js_graph);
     let (routes, _) = js_routes_to_routes(js_routes, &graph, &map);
-    let routes: HashMap<_, _> = routes.into_iter().map(|route| (route.name.clone(), route)).collect();
+    let routes: HashMap<_, _> = routes
+        .into_iter()
+        .map(|route| (route.name.clone(), route))
+        .collect();
     let mut search_map = generate_shortest_path_search_map(&graph, &routes);
     let start = map[&source];
     let end = map[&target];
     let paths = shortest_paths(start, end, &mut search_map, 1);
     eprintln!("Shortest paths: {:?}", paths);
-    
-    
-    /* 
+
+    /*
 
     let end = *map.get(target).unwrap();
 
@@ -158,16 +163,16 @@ fn shortest_path(js_graph: JsGraph, js_routes: JsRoutes, source: String, target:
     */
 }
 
-fn js_routes_to_routes(js_routes: JsRoutes, subway_map: &SubwayMap, cytoscape_id_map: &HashMap<String, NodeIndex>) -> (Vec<Route>, Vec<String>) {
+fn js_routes_to_routes(
+    js_routes: JsRoutes,
+    subway_map: &SubwayMap,
+    cytoscape_id_map: &HashMap<String, NodeIndex>,
+) -> (Vec<Route>, Vec<String>) {
     let mut route_id_map = Vec::new();
     let mut routes = Vec::new();
     for (_, route) in js_routes {
         let mut station_to = HashMap::with_capacity(route.nodes.len());
-        let node_ids: HashSet<_> = route
-            .nodes
-            .iter()
-            .map(|id| cytoscape_id_map[id])
-            .collect();
+        let node_ids: HashSet<_> = route.nodes.iter().map(|id| cytoscape_id_map[id]).collect();
 
         for node in &node_ids {
             for neighbor_edge in subway_map.edges_directed(*node, Direction::Outgoing) {
@@ -178,7 +183,6 @@ fn js_routes_to_routes(js_routes: JsRoutes, subway_map: &SubwayMap, cytoscape_id
             }
         }
 
-        // TODO: is this restriction overly limiting?
         routes.push(Route {
             name: route.name,
             start_station: cytoscape_id_map[&route.nodes[0]],
@@ -190,7 +194,11 @@ fn js_routes_to_routes(js_routes: JsRoutes, subway_map: &SubwayMap, cytoscape_id
     (routes, route_id_map)
 }
 
-fn simulation_results_to_js(simulation_results: SimulationResults, petgraph_map: &HashMap<TrackStationId, String>, route_id_map: &[String]) -> JsSimulationResults {
+fn simulation_results_to_js(
+    simulation_results: SimulationResults,
+    petgraph_map: &HashMap<TrackStationId, String>,
+    route_id_map: &[String],
+) -> JsSimulationResults {
     let train_positions: Vec<_> = simulation_results
         .train_positions
         .into_iter()
@@ -208,32 +216,45 @@ fn simulation_results_to_js(simulation_results: SimulationResults, petgraph_map:
                 .collect(),
         })
         .collect();
-    
-    let train_to_route = simulation_results.train_to_route.into_iter().map(|(train, route)| (format!("{}_{}", train.route_idx, train.count), route_id_map[route.0 as usize].clone())).collect();
+
+    let train_to_route = simulation_results
+        .train_to_route
+        .into_iter()
+        .map(|(train, route)| {
+            (
+                format!("{}_{}", train.route_idx, train.count),
+                route_id_map[route.0 as usize].clone(),
+            )
+        })
+        .collect();
 
     let station_statistics = simulation_results
         .station_statistics
         .into_iter()
         .map(|(id, s)| {
-            
             let overall_arrival_times = (s.arrival_times.len() > 1).then(|| {
                 let mut data = Vec::new();
-                s.arrival_times.values().for_each(|arrival_time| data.extend(arrival_time));
+                s.arrival_times
+                    .values()
+                    .for_each(|arrival_time| data.extend(arrival_time));
                 data.sort_unstable_by(f64::total_cmp);
                 calculate_arrival_time_statistics(data)
             });
-            let arrival_times = s.arrival_times.into_iter().map(|(r_id, data)| {
-
-                        (
-                            route_id_map[r_id.0 as usize].clone(),
-                            calculate_arrival_time_statistics(data)
-                        )
-                    }).collect();
+            let arrival_times = s
+                .arrival_times
+                .into_iter()
+                .map(|(r_id, data)| {
+                    (
+                        route_id_map[r_id.0 as usize].clone(),
+                        calculate_arrival_time_statistics(data),
+                    )
+                })
+                .collect();
             (
                 petgraph_map[&TrackStationId::Station(id)].clone(),
                 JsStationStatistic {
                     arrival_times,
-                    overall_arrival_times
+                    overall_arrival_times,
                 },
             )
         })
@@ -250,14 +271,18 @@ fn simulation_results_to_js(simulation_results: SimulationResults, petgraph_map:
 async fn run_simulation(
     js_graph: JsGraph,
     js_routes: JsRoutes,
-    frequency: u64
+    frequency: u64,
 ) -> Result<JsSimulationResults, String> {
     let (subway_map, cytoscape_id_map, petgraph_map) = js_graph_to_subway_map(js_graph.clone());
     let (routes, route_id_map) = js_routes_to_routes(js_routes, &subway_map, &cytoscape_id_map);
-    
+
     let simulator = Simulator::new(subway_map, routes.clone());
     let simulation_results = simulator.run(60, frequency);
-    Ok(simulation_results_to_js(simulation_results, &petgraph_map, &route_id_map))
+    Ok(simulation_results_to_js(
+        simulation_results,
+        &petgraph_map,
+        &route_id_map,
+    ))
 }
 
 #[tauri::command]
@@ -267,39 +292,42 @@ async fn run_optimize(
 ) -> Result<JsSimulationResults, String> {
     let (subway_map, cytoscape_id_map, petgraph_map) = js_graph_to_subway_map(js_graph.clone());
     let (routes, route_id_map) = js_routes_to_routes(js_routes, &subway_map, &cytoscape_id_map);
-    
+
     let routes = routes.into_iter().map(|r| (r.name.clone(), r)).collect();
 
-    
     let mut rng = StdRng::seed_from_u64(5051);
     let mut dfs_space = DfsSpace::new(&subway_map);
-    
+
     let mut trip_data = TripData::new();
-    
-    for _ in 0..SCHEDULE_GRANULARITY*SCHEDULE_PERIOD {
+
+    for _ in 0..SCHEDULE_GRANULARITY * SCHEDULE_PERIOD {
         let start = subway_map.node_indices().choose(&mut rng).unwrap();
         let end = subway_map.node_indices().choose(&mut rng).unwrap();
-        
+
         if has_path_connecting(&subway_map, start, end, Some(&mut dfs_space)) {
             let trip = Trip {
                 start,
                 end,
                 count: 1,
             };
-            trip_data.entry(rng.gen_range(0..SCHEDULE_PERIOD - SCHEDULE_GRANULARITY)).or_default().push(trip);
+            trip_data
+                .entry(rng.gen_range(0..SCHEDULE_PERIOD - SCHEDULE_GRANULARITY))
+                .or_default()
+                .push(trip);
         }
     }
 
-    
-    // TODO use actual trip data. where to source it from?
     let (schedule, simulation_results) = optimize(subway_map, routes, &trip_data);
-    
-    
+
     println!("Found schedule: {:#?}", schedule);
-    
+
     // TODO handle error condition
     let simulation_results = simulation_results.unwrap();
-    Ok(simulation_results_to_js(simulation_results, &petgraph_map, &route_id_map))
+    Ok(simulation_results_to_js(
+        simulation_results,
+        &petgraph_map,
+        &route_id_map,
+    ))
 }
 
 #[derive(Serialize)]
@@ -341,7 +369,11 @@ struct JsSimulationResults {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![run_simulation, shortest_path, run_optimize])
+        .invoke_handler(tauri::generate_handler![
+            run_simulation,
+            shortest_path,
+            run_optimize
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -354,8 +386,16 @@ fn calculate_arrival_time_statistics(data: Vec<f64>) -> JsArrivalStats {
         prev_time = *item;
     }
     JsArrivalStats {
-        min_wait: differences.iter().copied().min_by(f64::total_cmp).unwrap_or_default(),
-        max_wait: differences.iter().copied().max_by(f64::total_cmp).unwrap_or_default(),
+        min_wait: differences
+            .iter()
+            .copied()
+            .min_by(f64::total_cmp)
+            .unwrap_or_default(),
+        max_wait: differences
+            .iter()
+            .copied()
+            .max_by(f64::total_cmp)
+            .unwrap_or_default(),
         average_wait: differences.iter().sum::<f64>() / differences.len() as f64,
     }
 }

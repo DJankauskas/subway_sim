@@ -458,8 +458,6 @@ function initializeGraph(core: Core, subwayGraph: SubwayGraph) {
     }
 }
 
-/* TODO REMOVE TEMPORARY */
-
 function graphToSubwayGraph(core: Core, routes: SubwayGraph["routes"]): SubwayGraph {
     const nodes = [];
     for (const node of core.nodes()) {

@@ -1,5 +1,14 @@
-use std::{cmp::Ordering, collections::{BinaryHeap, HashMap, HashSet, hash_map::Entry::{Occupied, Vacant}}};
-use petgraph::{graph::{EdgeIndex, EdgeReference, NodeIndex}, visit::{EdgeRef, VisitMap, Visitable}};
+use petgraph::{
+    graph::{EdgeIndex, EdgeReference, NodeIndex},
+    visit::{EdgeRef, VisitMap, Visitable},
+};
+use std::{
+    cmp::Ordering,
+    collections::{
+        hash_map::Entry::{Occupied, Vacant},
+        BinaryHeap, HashMap, HashSet,
+    },
+};
 
 use crate::{simulator::SearchGraph, Edge};
 
