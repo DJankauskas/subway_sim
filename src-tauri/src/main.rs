@@ -133,30 +133,7 @@ fn shortest_path(js_graph: JsGraph, js_routes: JsRoutes, source: String, target:
     let start = map[&source];
     let end = map[&target];
     let paths = shortest_paths(start, end, &mut search_map, 1);
-    eprintln!("Shortest paths: {:?}", paths);
-
-    /*
-
-    let end = *map.get(target).unwrap();
-
-    let (length, path) = astar(
-        &graph,
-        *map.get(source).unwrap(),
-        |id| id == end,
-        |edge| *edge.weight(),
-        |_| 0,
-    )?;
-
-    let mut result = Vec::with_capacity(path.len());
-    for node in path {
-        result.push(graph[node].clone());
-    }
-
-    Some(ShortestPath {
-        length,
-        path: result,
-    })
-    */
+    println!("Shortest paths: {:?}", paths);
 }
 
 fn js_routes_to_routes(

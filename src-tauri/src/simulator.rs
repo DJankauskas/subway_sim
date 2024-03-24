@@ -1080,8 +1080,6 @@ fn search_to_routes(
         curr_edge = match costs[&source_node].1 {
             Some(curr_edge) => curr_edge,
             None => {
-                // TODO is this necessary?
-                // routes.push(RoutePath {id: curr_route.take().unwrap(), cost: curr_cost, start_node: curr_start_node, end_node: curr_end_node, edge_to_next: Some(curr_edge)});
                 break;
             }
         };
