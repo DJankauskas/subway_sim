@@ -107,6 +107,17 @@ fn js_graph_to_subway_map(
             edge.to_edge(),
         );
         petgraph_map.insert(TrackStationId::Track(edge_id), edge.id.clone());
+        
+        // walk edges are represented as one-way in JsGraph for creation convenience; they must
+        // be duplicated in the other direction to represent their two-way nature
+        if edge.r#type == "walk" {
+            let edge_id = graph.add_edge(
+                *cytoscape_map.get(&edge.target).unwrap(),
+                *cytoscape_map.get(&edge.source).unwrap(),
+                edge.to_edge(),
+            );
+            petgraph_map.insert(TrackStationId::Track(edge_id), edge.id.clone() + "_rev");
+        }
     }
     (graph, cytoscape_map, petgraph_map)
 }
@@ -260,12 +271,12 @@ async fn run_optimize(
     let routes = routes.into_iter().map(|r| (r.name.clone(), r)).collect();
 
     
-    let mut rng = StdRng::seed_from_u64(5050);
+    let mut rng = StdRng::seed_from_u64(5051);
     let mut dfs_space = DfsSpace::new(&subway_map);
     
     let mut trip_data = TripData::new();
     
-    for _ in 0..25 {
+    for _ in 0..SCHEDULE_GRANULARITY*SCHEDULE_PERIOD {
         let start = subway_map.node_indices().choose(&mut rng).unwrap();
         let end = subway_map.node_indices().choose(&mut rng).unwrap();
         

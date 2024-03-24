@@ -759,7 +759,7 @@ pub fn optimize(subway_map: SubwayMap, routes: HashMap<String, Route>, trip_data
         let best_fragment = match best_fragment {
             Some(best_fragment) => best_fragment,
             None => {
-                println!("Found with cost: {lowest_cost}");
+                println!("Found with cost: {curr_cost}");
                 return (curr_schedule, curr_simulation_results);
             }
         };
@@ -981,8 +981,8 @@ fn search_to_routes(search_map: &SearchMap, costs: &HashMap<NodeIndex, (u16, Opt
     paths
 }
 
-const WALK_MULTIPLIER: f64 = 1.0;
-const WAIT_MULTIPLIER: f64 = 1.0;
+const WALK_MULTIPLIER: f64 = 2.0;
+const WAIT_MULTIPLIER: f64 = 2.0;
 
 fn calculate_costs(search_map: &mut SearchMap, frequencies: &[HashMap<String, Cell<i64>>], routes: &HashMap<String, Route>, trip_data: &TripData) -> f64 {
     let mut total_cost = 0.;
