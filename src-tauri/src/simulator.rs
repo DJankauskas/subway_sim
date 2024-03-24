@@ -738,15 +738,15 @@ type Frequencies = Vec<HashMap<String, Cell<i64>>>;
 
 pub fn optimize(
     subway_map: SubwayMap,
-    routes: HashMap<String, Route>,
+    routes: Vec<Route>,
     trip_data: &TripData,
 ) -> (Schedule, Option<SimulationResults>) {
     let mut frequencies: Frequencies =
         Vec::with_capacity((SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) as usize);
     for _ in 0..(SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) {
         let mut map = HashMap::with_capacity(routes.len());
-        for route in routes.keys() {
-            map.insert(route.clone(), Cell::new(1));
+        for route in &routes {
+            map.insert(route.name.clone(), Cell::new(1));
         }
         frequencies.push(map);
     }
@@ -756,9 +756,9 @@ pub fn optimize(
     let mut curr_cost = f64::MAX;
 
     let mut curr_schedule = Schedule::new();
-    for route in routes.keys() {
+    for route in &routes {
         curr_schedule.insert(
-            route.clone(),
+            route.name.clone(),
             vec![1; (SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) as usize],
         );
     }
@@ -768,7 +768,7 @@ pub fn optimize(
     let mut search_map = generate_shortest_path_search_map(&subway_map, &routes);
 
     let mut routes_vec = Vec::with_capacity(routes.len());
-    for route in routes.values() {
+    for route in &routes {
         routes_vec.push(route.clone());
     }
     let mut simulator = Simulator::new(subway_map, routes_vec);
@@ -860,7 +860,7 @@ pub struct SearchMap {
 // map, they will be connected with walk edges.
 pub fn generate_shortest_path_search_map(
     subway_map: &SubwayMap,
-    routes: &HashMap<String, Route>,
+    routes: &[Route],
 ) -> SearchMap {
     let mut search_map = SearchGraph::new();
     let mut old_to_new_nodes = HashMap::new();
@@ -870,18 +870,18 @@ pub fn generate_shortest_path_search_map(
     let mut route_old_to_new_nodes = HashMap::new();
 
     // For each route create nodes and edges for it
-    for (key, route) in routes.iter() {
+    for route in routes {
         let mut create_node = |old_node: NodeIndex, search_map: &mut SearchGraph| -> NodeIndex {
-            match route_old_to_new_nodes.get(&(key, old_node)) {
+            match route_old_to_new_nodes.get(&(&route.name, old_node)) {
                 Some(node) => *node,
                 None => {
                     let new_nodes = old_to_new_nodes.entry(old_node).or_insert(Vec::new());
                     let route_node = search_map.add_node(SearchNode {
-                        route: key.clone(),
+                        route: route.name.clone(),
                         old_node,
                     });
                     new_nodes.push(route_node);
-                    route_old_to_new_nodes.insert((key, old_node), route_node);
+                    route_old_to_new_nodes.insert((&route.name, old_node), route_node);
                     route_node
                 }
             }
@@ -1097,7 +1097,7 @@ const WAIT_MULTIPLIER: f64 = 2.0;
 fn calculate_costs(
     search_map: &mut SearchMap,
     frequencies: &[HashMap<String, Cell<i64>>],
-    routes: &HashMap<String, Route>,
+    routes: &[Route],
     trip_data: &TripData,
 ) -> f64 {
     let mut total_cost = 0.;

@@ -129,10 +129,6 @@ fn js_graph_to_subway_map(
 fn shortest_path(js_graph: JsGraph, js_routes: JsRoutes, source: String, target: String) {
     let (graph, map, _) = js_graph_to_subway_map(js_graph);
     let (routes, _) = js_routes_to_routes(js_routes, &graph, &map);
-    let routes: HashMap<_, _> = routes
-        .into_iter()
-        .map(|route| (route.name.clone(), route))
-        .collect();
     let mut search_map = generate_shortest_path_search_map(&graph, &routes);
     let start = map[&source];
     let end = map[&target];
@@ -292,8 +288,6 @@ async fn run_optimize(
 ) -> Result<JsSimulationResults, String> {
     let (subway_map, cytoscape_id_map, petgraph_map) = js_graph_to_subway_map(js_graph.clone());
     let (routes, route_id_map) = js_routes_to_routes(js_routes, &subway_map, &cytoscape_id_map);
-
-    let routes = routes.into_iter().map(|r| (r.name.clone(), r)).collect();
 
     let mut rng = StdRng::seed_from_u64(5051);
     let mut dfs_space = DfsSpace::new(&subway_map);
