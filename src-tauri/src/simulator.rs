@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 
 use petgraph::graph::{EdgeIndex, NodeIndex};
-use petgraph::visit::EdgeRef;
+use petgraph::visit::{EdgeRef, IntoEdgesDirected};
 use petgraph::Direction;
 use petgraph::Graph;
 use z3::ast::Ast;
@@ -151,10 +151,25 @@ impl Simulator {
         let mut traversal_order: Vec<TrackStationId> = Vec::new();
         let mut visited = HashSet::new();
 
+        'bfs:
         while let Some(track_station) = queue.pop_front() {
             if visited.contains(&track_station) {
                 continue;
             };
+            
+            // If we get to a station where some of the edges it feeds into haven't been processed yet,
+            // skip processing now, with the assumption that we'll be returning later. Note that this 
+            // requires all meaningful tracks to be assigned to a route.
+            if let TrackStationId::Station(station) = track_station {
+                for edge in subway_map.edges_directed(station, Direction::Outgoing).filter(|e| e.weight().ty == EdgeType::Track) {
+                    if !visited.contains(&TrackStationId::Track(edge.id())) {
+                        continue 'bfs;
+                    }
+                }
+            }
+            
+
+            
             visited.insert(track_station);
             traversal_order.push(track_station);
             match track_station {
