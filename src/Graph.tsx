@@ -196,6 +196,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShor
                         selector: 'edge[type="walk"]',
                         style: {
                             'line-style': 'dashed',
+                            'target-arrow-shape': 'none',
                         },
                     },
                     {
