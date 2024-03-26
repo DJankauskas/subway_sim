@@ -68,6 +68,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShor
     const [secondaryStringlineRoute, setSecondaryStringlineRoute] = useState<string | undefined>(undefined);
     const [routeToEdit, setRouteToEdit] = useState("");
     const [newRouteName, setNewRouteName] = useState("")
+    const [routeColor, setRouteColor] = useState("red");
 
 
     // Update upstream graph with current graph state
@@ -161,8 +162,10 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShor
                     }
 
                     selected.unselect();
+                    
+                    console.log("Setting color to ", routeColor);
 
-                    setRoutes({ ...routes, [route.id]: {...route, nodes: nodesSorted, edges: edgesSorted} });
+                    setRoutes({ ...routes, [route.id]: {...route, nodes: nodesSorted, edges: edgesSorted, color: routeColor} });
                 }
             }
             if (event.key === 'r') {
@@ -174,7 +177,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShor
         return () => {
             document.removeEventListener('keydown', keydownHandler);
         };
-    }, [graph, mode, editType])
+    }, [graph, mode, editType, routeColor])
 
     // Set up graph styles on component initialization
     useEffect(() => {
@@ -210,7 +213,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShor
                     {
                         selector: 'node[type="train"]',
                         style: {
-                            'background-color': 'red'
+                            'background-color': 'data(color)'
                         }
                     }
                 ]
@@ -328,7 +331,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShor
                         routesWithOffsets[id] = { ...route, offset: routeOffsets[id] || 0 };
                     }
                     const results = await onSimulate(serializeGraph(graph), routesWithOffsets, parseInt(frequency) || 4);
-                    renderTrainPositions(graph, results.train_positions);
+                    renderTrainPositions(graph, results, routes);
                     setSimulationResults(results);
                 }
             }}>Simulate</button>
@@ -339,7 +342,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShor
                         routesWithOffsets[id] = { ...route, offset: routeOffsets[id] || 0 };
                     }
                     const results = await onOptimize(serializeGraph(graph), routesWithOffsets);
-                    renderTrainPositions(graph, results.train_positions);
+                    renderTrainPositions(graph, results, routes);
                     setSimulationResults(results);
                 }
             }}>Optimize</button>
@@ -354,7 +357,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShor
                         <RouteSelector route={secondaryStringlineRoute} setRoute={setSecondaryStringlineRoute} routes={routes} />
                         <StringlineChart
                             stations={primaryStringlineRoute ? namedStationsOfRoute(routes[primaryStringlineRoute], initialSubwayGraph) : []}
-                            stringlines={trainPositionsToStringlines(simulationResults.train_positions, simulationResults.train_to_route, 60, new Set(primaryStringlineRoute ? [primaryStringlineRoute, ...(secondaryStringlineRoute ? [secondaryStringlineRoute] : [])] : []))}
+                            stringlines={trainPositionsToStringlines(simulationResults.train_positions, simulationResults.train_to_route, 60, new Set(primaryStringlineRoute ? [primaryStringlineRoute, ...(secondaryStringlineRoute ? [secondaryStringlineRoute] : [])] : []), routes)}
                         />
                     </>
                 )
@@ -391,23 +394,36 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShor
                 />
                 : null}
             {mode == 'route_edit' ? <>
-                <RouteSelector routes={routes} route={routeToEdit} setRoute={(route) => {
-                    setRouteToEdit(route);
-                    graph?.$(':selected').unselect();
-                    console.log(`selected ${route} with data ${JSON.stringify(routes[route])}`)
-                    for (const node of routes[route].nodes) {
-                        graph?.getElementById(node).select();
+                <div>
+                    <RouteSelector routes={routes} route={routeToEdit} setRoute={(route) => {
+                        setRouteToEdit(route);
+                        graph?.$(':selected').unselect();
+                        console.log(`selected ${route} with data ${JSON.stringify(routes[route])}`)
+                        for (const node of routes[route].nodes) {
+                            graph?.getElementById(node).select();
+                        }
+                        for (const edge of routes[route].edges) {
+                            graph?.getElementById(edge).select();
+                        }
                     }
-                    for (const edge of routes[route].edges) {
-                        graph?.getElementById(edge).select();
-                    }
-                }
-                } requireSelection />
+                    } requireSelection />
+                    <select value={routeColor} onChange={e => {
+                        setRouteColor(e.currentTarget.value);
+                        console.log(`Setting route color to ${e.currentTarget.value}`);
+                    }}>
+                        <option value="orange">Orange</option>
+                        <option value="yellow">Yellow</option>
+                        <option value="lightgreen">Green</option>
+                        <option value="blue">Blue</option>
+                        <option value="red">Red</option>
+                    </select>
+
+                </div>
                 <div>
                     <input type="text" value={newRouteName} onChange={e => setNewRouteName(e.currentTarget.value)}></input>
                     <button onClick={() => {
                         const id = (Math.floor(Math.random() * 2 ** 50)).toString();
-                        setRoutes({ ...routes, [id]: { name: newRouteName, id, nodes: [], edges: [] } });
+                        setRoutes({ ...routes, [id]: { name: newRouteName, id, nodes: [], edges: [], color: routeColor } });
                         setNewRouteName("");
                     }}>Create route</button>
                 </div>
@@ -491,7 +507,7 @@ function clearTrains(graph: cytoscape.Core) {
     graph.$('node[type = "train"]').remove();
 }
 
-function setTrainPositions(graph: cytoscape.Core, trainPositions: TrainPositions) {
+function setTrainPositions(graph: cytoscape.Core, simulationResults: SimulationResults, trainPositions: TrainPositions, routes: Routes) {
     clearTrains(graph);
     for (const train of trainPositions.trains) {
         const element = graph.$id(train.curr_section) as NodeSingular | EdgeSingular;
@@ -508,9 +524,10 @@ function setTrainPositions(graph: cytoscape.Core, trainPositions: TrainPositions
         } else {
             continue;
         }
+        console.log(train.id.toString(), simulationResults.train_to_route[train.id.toString()], routes[simulationResults.train_to_route[train.id.toString()]]);
         graph.add({
             group: 'nodes',
-            data: { type: 'train', name: '' },
+            data: { type: 'train', name: '', color: routes[simulationResults.train_to_route[`${train.id[0]}_${train.id[1]}`]].color },
             position: {
                 x,
                 y,
@@ -519,19 +536,19 @@ function setTrainPositions(graph: cytoscape.Core, trainPositions: TrainPositions
     }
 }
 
-function renderTrainPositions(graph: cytoscape.Core, trainPositions: TrainPositions[]) {
-    function impl(graph: cytoscape.Core, trainPositions: TrainPositions[], pos: number) {
-        if (pos >= trainPositions.length) {
+function renderTrainPositions(graph: cytoscape.Core, simulationResults: SimulationResults, routes: Routes) {
+    function impl(graph: cytoscape.Core, pos: number) {
+        if (pos >= simulationResults.train_positions.length) {
             setTimeout(() => clearTrains(graph));
             return;
         }
         setTimeout(() => {
-            setTrainPositions(graph, trainPositions[pos]);
-            impl(graph, trainPositions, pos + 1);
+            setTrainPositions(graph, simulationResults, simulationResults.train_positions[pos], routes);
+            impl(graph, pos + 1);
         }, 1000);
     }
 
-    impl(graph, trainPositions, 0);
+    impl(graph, 0);
 }
 
 function serializeGraph(graph: cytoscape.Core): any {
@@ -567,7 +584,7 @@ const StationStatisticTooltip = ({ statistic, routes }: { statistic: StationStat
     )
 }
 
-function trainPositionsToStringlines(positions: TrainPositions[], trainToRoute: Record<number, string>, to: number, routes: Set<string>): Record<number, Stringline[]> {
+function trainPositionsToStringlines(positions: TrainPositions[], trainToRoute: Record<number, string>, to: number, routes: Set<string>, allRoutes: Routes): Record<number, Stringline[]> {
     const trainPositions: Record<string, StringlinePoint[]> = {};
     for (const position of positions) {
         if (position.time > to) break;
@@ -590,7 +607,7 @@ function trainPositionsToStringlines(positions: TrainPositions[], trainToRoute: 
     for (const [id, positions] of Object.entries(trainPositions)) {
         const route = trainToRoute[id as any];
         if (routes.has(route)) {
-            stringlines[trainToRoute[id as any]].push(positions);
+            stringlines[route].push({points: positions, color: allRoutes[route].color});
         }
     }
 

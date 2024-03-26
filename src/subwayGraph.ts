@@ -5,6 +5,7 @@ export const Route = z.object({
     id: z.string(),
     nodes: z.array(z.string()),
     edges: z.array(z.string()),
+    color: z.string().default("red"),
 });
 
 export type Route = z.infer<typeof Route>;

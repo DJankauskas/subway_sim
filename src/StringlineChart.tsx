@@ -14,7 +14,11 @@ export interface StringlinePoint {
     x: number,
     y: number,
 }
-export type Stringline = StringlinePoint[];
+
+export interface Stringline {
+    points: StringlinePoint[],
+    color: string,
+}
 
 interface TransitStringlineDiagramProps {
     stations: Station[];
@@ -28,18 +32,18 @@ export const StringlineChart: React.FC<TransitStringlineDiagramProps> = ({ stati
     const secondaryStringlines = stringlines[Object.keys(stringlines)[1] as any];
     const primaryDatasets = primaryStringlines?.map(stringline => ({
             label: 'Stringline',
-            data: stringline,
-            borderColor: 'blue',
-            backgroundColor: 'blue',
+            data: stringline.points,
+            borderColor: stringline.color,
+            backgroundColor: stringline.color,
             showLine: true,
             fill: false,
             pointRadius: 0,
         }));
     const secondaryDatasets = secondaryStringlines?.map(stringline => ({
             label: 'Stringline',
-            data: stringline,
-            borderColor: 'red',
-            backgroundColor: 'red',
+            data: stringline.points,
+            borderColor: stringline.color,
+            backgroundColor: stringline.color,
             showLine: true,
             fill: false,
             pointRadius: 0,
