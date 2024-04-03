@@ -168,6 +168,14 @@ impl Simulator {
                 }
             }
             
+            let mut all_route_edges = HashSet::new();
+            
+            for route in &routes {
+                for edge in route.station_to.values() {
+                    all_route_edges.insert(*edge);
+                }
+            }
+            
 
             
             visited.insert(track_station);
@@ -178,7 +186,7 @@ impl Simulator {
                     queue.push_back(TrackStationId::Station(source));
                 }
                 TrackStationId::Station(station) => subway_map
-                    .edges_directed(station, Direction::Incoming)
+                    .edges_directed(station, Direction::Incoming).filter(|edge| all_route_edges.contains(&edge.id()))
                     .for_each(|track| queue.push_back(TrackStationId::Track(track.id()))),
             }
         }
