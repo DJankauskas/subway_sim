@@ -324,18 +324,24 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShor
     return (
         <div>
             <div ref={divRef} style={{ width: 800, height: 400 }}></div>
-            <button onClick={async () => {
-                if (graph) {
-                    const routesWithOffsets = {} as Record<string, Route & { offset: number }>;
-                    for (const [id, route] of Object.entries(routes)) {
-                        routesWithOffsets[id] = { ...route, offset: routeOffsets[id] || 0 };
+            <div>
+                <button style={{marginRight: 10}} onClick={async () => {
+                    if (graph) {
+                        const routesWithOffsets = {} as Record<string, Route & { offset: number }>;
+                        for (const [id, route] of Object.entries(routes)) {
+                            routesWithOffsets[id] = { ...route, offset: routeOffsets[id] || 0 };
+                        }
+                        const results = await onSimulate(serializeGraph(graph), routesWithOffsets, parseInt(frequency) || 4);
+                        renderTrainPositions(graph, results, routes);
+                        setSimulationResults(results);
                     }
-                    const results = await onSimulate(serializeGraph(graph), routesWithOffsets, parseInt(frequency) || 4);
-                    renderTrainPositions(graph, results, routes);
-                    setSimulationResults(results);
-                }
-            }}>Simulate</button>
-            <button onClick={async () => {
+                }}>Simulate</button>
+                <label>
+                    Simulation frequency:
+                    <input style={{marginLeft: 5}} type="number" pattern="[0-9]*" placeholder="Frequency" value={frequency} onChange={e => setFrequency(e.currentTarget.value)} />
+                </label>
+            </div>
+            <button style={{marginTop: 5}} onClick={async () => {
                 if (graph) {
                     const routesWithOffsets = {} as Record<string, Route & { offset: number }>;
                     for (const [id, route] of Object.entries(routes)) {
@@ -346,8 +352,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShor
                     setSimulationResults(results);
                 }
             }}>Optimize</button>
-            <input type="number" pattern="[0-9]*" placeholder="Frequency" value={frequency} onChange={e => setFrequency(e.currentTarget.value)} />
-            <div hidden={false}>
+            <div hidden={true}>
                 {Object.entries(routes).map(([key, data]) => <div key={key}><div>{data.name}</div><input placeholder="Offset" type="number" pattern="[0-9]*" value={routeOffsets[key] || ""} onChange={e => setRouteOffsets({ ...routeOffsets, [key]: parseInt(e.currentTarget.value) })} /></div>)}
             </div>
             {simulationResults ?
@@ -395,7 +400,7 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShor
                 : null}
             {mode == 'route_edit' ? <>
                 <div>
-                    <RouteSelector routes={routes} route={routeToEdit} setRoute={(route) => {
+                    <RouteSelector routes={routes} route={routeToEdit} label="Route:" setRoute={(route) => {
                         setRouteToEdit(route);
                         graph?.$(':selected').unselect();
                         console.log(`selected ${route} with data ${JSON.stringify(routes[route])}`)
@@ -407,16 +412,19 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShor
                         }
                     }
                     } requireSelection />
-                    <select value={routeColor} onChange={e => {
-                        setRouteColor(e.currentTarget.value);
-                        console.log(`Setting route color to ${e.currentTarget.value}`);
-                    }}>
-                        <option value="orange">Orange</option>
-                        <option value="yellow">Yellow</option>
-                        <option value="lightgreen">Green</option>
-                        <option value="blue">Blue</option>
-                        <option value="red">Red</option>
-                    </select>
+                    <label style={{fontSize: 14, marginLeft: 10}}>
+                        Color: 
+                        <select style={{marginLeft: 5}} value={routeColor} onChange={e => {
+                            setRouteColor(e.currentTarget.value);
+                            console.log(`Setting route color to ${e.currentTarget.value}`);
+                        }}>
+                            <option value="orange">Orange</option>
+                            <option value="yellow">Yellow</option>
+                            <option value="lightgreen">Green</option>
+                            <option value="blue">Blue</option>
+                            <option value="red">Red</option>
+                        </select>
+                    </label>
 
                 </div>
                 <div>
@@ -625,19 +633,24 @@ type RouteSelectorProps = {
     setRoute: (r: string) => void,
     routes: Routes,
     requireSelection: true,
+    label?: string,
 } | {
     route: string | undefined,
     setRoute: (r: string | undefined) => void,
     routes: Routes,
     requireSelection?: false
+    label?: string,
 }
 
-const RouteSelector: React.FC<RouteSelectorProps> = ({ route, setRoute, routes, requireSelection }) => {
+const RouteSelector: React.FC<RouteSelectorProps> = ({ route, setRoute, routes, requireSelection, label }) => {
     return (
-        <select value={route} onChange={e => setRoute(e.currentTarget.value)}>
+    <label style={{fontSize: 14}}>
+        {label ?? ''}
+        <select style={{marginLeft: label ? 5 : 0}} value={route} onChange={e => setRoute(e.currentTarget.value)}>
             {requireSelection ? null : <option key="none">None</option>}
             {Object.entries(routes).map(([key, value]) => <option key={key} value={key}>{value.name}</option>)}
         </select>
+    </label>
     )
 }
 

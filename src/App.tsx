@@ -42,7 +42,6 @@ function App() {
   }, []);
   return (
     <div style={{display: 'flex', flexDirection: 'column'}}>
-    <h1>Shortest Path</h1>
       <Graph mode={mode} initialSubwayGraph={initialSubwayGraph} onSimulate={runSimulation} onOptimize={runOptimize} onShortestPath={shortestPath} getCurrentSubwayGraph={getSubwayGraph} />
       <div>
         <div>
@@ -53,7 +52,7 @@ function App() {
           <input type="radio" value="edit" checked={mode === "edit"} onChange={handleMode} />
           <label htmlFor="edit">Edit</label>
         </div>
-        <div>
+        <div hidden={true}>
           <input type="radio" value="path_select" checked={mode === "path_select"} onChange={handleMode} />
           <label htmlFor="path_select">Shortest path</label>
         </div>
