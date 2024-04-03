@@ -825,12 +825,13 @@ pub fn optimize(
             .get_mut(&best_fragment.1)
             .unwrap()
             .get_mut() += 1;
-        curr_simulation_results =
+        let simulation_results =
             simulator.hyper_hacky_schedule_trains(SCHEDULE_PERIOD as i32, &frequencies);
         simulator.reset();
 
         // TODO should we get an actual cost estimate here?
-        let cost = if curr_simulation_results.is_some() {
+        let cost = if simulation_results.is_some() {
+            curr_simulation_results = simulation_results;
             lowest_cost
         } else {
             f64::INFINITY
@@ -861,7 +862,30 @@ pub struct SearchNode {
     old_node: NodeIndex,
 }
 
-pub type SearchGraph = Graph<SearchNode, Edge>;
+#[derive(Copy, Clone)]
+pub struct SearchEdge {
+    pub ty: EdgeType,
+    pub weight: u16,
+    pub disabled: bool,
+}
+
+impl SearchEdge {
+    fn cost(self) -> u16 {
+        if self.disabled {u16::MAX} else {self.weight}
+    }
+}
+
+impl From<Edge> for SearchEdge {
+    fn from(edge: Edge) -> Self {
+        SearchEdge {
+            ty: edge.ty,
+            weight: edge.weight,
+            disabled: false,
+        }
+    }
+}
+
+pub type SearchGraph = Graph<SearchNode, SearchEdge>;
 
 pub struct SearchMap {
     map: SearchGraph,
@@ -906,7 +930,7 @@ pub fn generate_shortest_path_search_map(
             let (start, end) = subway_map.edge_endpoints(*edge).unwrap();
             let new_start_node = create_node(start, &mut search_map);
             let new_end_node = create_node(end, &mut search_map);
-            let new_edge = search_map.add_edge(new_start_node, new_end_node, subway_map[*edge]);
+            let new_edge = search_map.add_edge(new_start_node, new_end_node, subway_map[*edge].into());
             old_to_new_edges
                 .entry(*edge)
                 .or_insert(Vec::new())
@@ -923,9 +947,10 @@ pub fn generate_shortest_path_search_map(
                 search_map.add_edge(
                     related_nodes[i],
                     related_nodes[j],
-                    Edge {
+                    SearchEdge {
                         ty: crate::EdgeType::Walk,
                         weight: 1,
+                        disabled: false,
                     },
                 );
             }
@@ -947,7 +972,7 @@ pub fn generate_shortest_path_search_map(
             // Is this too aggressive? Can we just create one edge instead?
             for node1 in new_nodes1 {
                 for node2 in new_nodes2 {
-                    search_map.add_edge(*node1, *node2, *edge.weight());
+                    search_map.add_edge(*node1, *node2, (*edge.weight()).into());
                 }
             }
         }
@@ -977,7 +1002,7 @@ pub fn shortest_paths(
     end: NodeIndex,
     search_map: &mut SearchMap,
     mut k: usize,
-) -> Vec<Vec<RoutePath>> {
+) -> Vec<Vec<PathSegment>> {
     assert!(k >= 1);
     let valid_end_nodes: HashSet<_> = search_map.old_to_new_nodes[&end]
         .clone()
@@ -997,9 +1022,10 @@ pub fn shortest_paths(
         search_map.map.add_edge(
             virtual_start_node,
             *start_node,
-            Edge {
+            SearchEdge {
                 ty: EdgeType::Walk,
                 weight: 0,
+                disabled: false,
             },
         );
     }
@@ -1009,7 +1035,7 @@ pub fn shortest_paths(
         &search_map.map,
         virtual_start_node,
         &valid_end_nodes,
-        |edge| edge.weight().weight,
+        |edge| edge.weight().cost(),
     );
     let destination = match destination {
         Terminated::Exhaustive => {
@@ -1018,25 +1044,58 @@ pub fn shortest_paths(
         Terminated::At(destination) => destination,
     };
 
-    let routes = search_to_routes(search_map, &costs, destination);
+    let path = search_to_path(search_map, &costs, destination);
     k -= 1;
-    for _route in &routes {
+
+    let mut paths = Vec::new();
+
+    for segment in &path {
         if k == 0 {
             break;
         }
+        
+        let mut disabled_edges = Vec::new();
+        
+        for neighbor in search_map.map.neighbors_undirected(segment.end_node) {
+            for edge in search_map.map.edges_connecting(segment.end_node, neighbor) {
+                if edge.weight().ty == EdgeType::Walk {
+                    disabled_edges.push(edge.id());
+                }
+            }
+        }        
+        for edge in &disabled_edges {
+            search_map.map[*edge].disabled = true;
+        }
 
-        // TODO calculate more routes by disabling edges
+        let (costs, destination) = dijkstra(
+            &search_map.map,
+            virtual_start_node,
+            &valid_end_nodes,
+            |edge| edge.weight().cost(),
+        );
+
+        for edge in &disabled_edges {
+            search_map.map[*edge].disabled = false;
+        }
+
+        let destination = match destination {
+            Terminated::Exhaustive => continue,
+            Terminated::At(destination) => destination,
+        };
+        let path = search_to_path(search_map, &costs, destination);
+        paths.push(path);
 
         k -= 1;
     }
+    paths.push(path);
 
     search_map.map.remove_node(virtual_start_node);
-
-    vec![routes]
+    
+    paths
 }
 
 #[derive(Debug)]
-pub struct RoutePath {
+pub struct PathSegment {
     routes: HashSet<String>,
     cost: u16,
     start_node: NodeIndex,
@@ -1044,11 +1103,11 @@ pub struct RoutePath {
     edge_to_next: Option<EdgeIndex>,
 }
 
-fn search_to_routes(
+fn search_to_path(
     search_map: &SearchMap,
     costs: &HashMap<NodeIndex, (u16, Option<EdgeIndex>)>,
     destination: NodeIndex,
-) -> Vec<RoutePath> {
+) -> Vec<PathSegment> {
     let mut curr_edge = costs[&destination].1.unwrap();
     let mut paths = Vec::new();
 
@@ -1073,7 +1132,7 @@ fn search_to_routes(
                     .map(|node| search_map.map[*node].route.clone())
                     .collect();
                 let routes = HashSet::from_iter(start_routes.intersection(&end_routes).cloned());
-                paths.push(RoutePath {
+                paths.push(PathSegment {
                     routes,
                     cost: curr_cost,
                     start_node: curr_start_node,
@@ -1117,7 +1176,7 @@ fn calculate_costs(
     for (time, trips) in trip_data.iter() {
         for trip in trips {
             // TODO do more than one path?
-            let paths = shortest_paths(trip.start, trip.end, search_map, 1);
+            let paths = shortest_paths(trip.start, trip.end, search_map, 3);
             assert!(!paths.is_empty());
             let mut lowest_cost = f64::INFINITY;
             'path: for path in paths.iter() {
@@ -1125,7 +1184,7 @@ fn calculate_costs(
                 let mut cost = 0.;
                 for segment in path {
                     let curr_schedule = curr_time as i64 / SCHEDULE_GRANULARITY;
-                    // if the journey runs overtime don't consider it
+                    // if the journey runs overtime stop considering subsequent segments
                     if curr_schedule as usize >= frequencies.len() {
                         continue 'path;
                     }

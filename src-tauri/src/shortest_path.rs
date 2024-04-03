@@ -10,7 +10,7 @@ use std::{
     },
 };
 
-use crate::{simulator::SearchGraph, Edge};
+use crate::simulator::{SearchEdge, SearchGraph};
 
 pub enum Terminated {
     Exhaustive,
@@ -25,7 +25,7 @@ pub fn dijkstra<F>(
     mut edge_cost: F,
 ) -> (HashMap<NodeIndex, (u16, Option<EdgeIndex>)>, Terminated)
 where
-    F: FnMut(EdgeReference<Edge>) -> u16,
+    F: FnMut(EdgeReference<SearchEdge>) -> u16,
 {
     let mut visited = graph.visit_map();
     let mut scores = HashMap::new();

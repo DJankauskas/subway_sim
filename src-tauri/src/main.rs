@@ -52,7 +52,7 @@ impl JsEdge {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-enum EdgeType {
+pub enum EdgeType {
     Track,
     Walk,
 }
