@@ -801,6 +801,18 @@ pub fn optimize(
         routes_vec.push(route.clone());
     }
     let mut simulator = Simulator::new(subway_map, routes_vec);
+    
+    // cache shortest paths
+    let mut shortest_paths_cache = HashMap::new();
+    
+    for trips in trip_data.values() {
+        for trip in trips {
+            let key = (trip.start, trip.end);
+            shortest_paths_cache.entry(key).or_insert_with(|| {
+                shortest_paths(trip.start, trip.end, &mut search_map, 1)
+            });
+        }
+    }
 
     loop {
         let mut best_fragment = None;
@@ -816,7 +828,7 @@ pub fn optimize(
                 frequency.set(frequency.get() + 1);
                 // calculate cost if frequency goes up by increment of 1
                 let estimated_cost =
-                    calculate_costs(&mut search_map, &frequencies, &routes, trip_data);
+                    calculate_costs(&mut search_map, &frequencies, &routes, trip_data, &shortest_paths_cache);
                 if estimated_cost < lowest_cost {
                     lowest_cost = estimated_cost;
                     best_fragment = Some((time, id.clone()));
@@ -1185,12 +1197,13 @@ fn calculate_costs(
     frequencies: &[HashMap<String, Cell<i64>>],
     routes: &[Route],
     trip_data: &TripData,
+    shortest_paths: &HashMap<(NodeIndex, NodeIndex), Vec<Vec<PathSegment>>>
 ) -> f64 {
     let mut total_cost = 0.;
     for (time, trips) in trip_data.iter() {
         for trip in trips {
             // TODO do more than one path?
-            let paths = shortest_paths(trip.start, trip.end, search_map, 1);
+            let paths = &shortest_paths[&(trip.start, trip.end)];
             assert!(!paths.is_empty());
             let mut lowest_cost = f64::INFINITY;
             'path: for path in paths.iter() {
