@@ -109,11 +109,11 @@ const MIN_TRAIN_DISTANCE: f64 = 2.0;
 const TIME_STEP: f64 = 1.0;
 
 fn f64_min(a: f64, b: f64) -> f64 {
-    *[a, b].iter().min_by(|a, b| a.total_cmp(b)).unwrap()
+    a.min(b)
 }
 
 fn f64_max(a: f64, b: f64) -> f64 {
-    *[a, b].iter().max_by(|a, b| a.total_cmp(b)).unwrap()
+    a.max(b)
 }
 
 impl Simulator {
@@ -228,6 +228,11 @@ impl Simulator {
             let distance_travelled = f64_max(STATION_DWELL_TIME - train_mut.pos, 0.0);
             train_mut.pos += distance_travelled;
             time_left -= distance_travelled;
+            
+            if train_mut.pos < STATION_DWELL_TIME {
+                return;
+            }
+
             let route_id = train_mut.route;
             let next_track_id = self.routes[&route_id].station_to.get(&station);
             let next_track_id = match next_track_id {
@@ -287,7 +292,7 @@ impl Simulator {
                             let track_mut = self.tracks.get_mut(&track).unwrap();
                             if self.stations[&next_station_id].train.is_some() {
                                 last_train_pos =
-                                    f64_max(track_mut.length as f64 - MIN_TRAIN_DISTANCE, 0.0);
+                                    f64_min(f64_max(track_mut.length as f64 - MIN_TRAIN_DISTANCE, 0.0), last_train_pos);
                             }
                             let curr_train_id = track_mut.trains[i];
                             let curr_train_mut = self.trains.get_mut(&curr_train_id).unwrap();
@@ -507,7 +512,7 @@ impl Simulator {
                             let track_mut = self.tracks.get_mut(&track).unwrap();
                             if self.stations[&next_station_id].train.is_some() {
                                 last_train_pos =
-                                    f64_max(track_mut.length as f64 - MIN_TRAIN_DISTANCE, 0.0);
+                                    f64_min(f64_max(track_mut.length as f64 - MIN_TRAIN_DISTANCE, 0.0), last_train_pos);
                             }
                             let curr_train_id = track_mut.trains[i];
                             let curr_train_mut = self.trains.get_mut(&curr_train_id).unwrap();
@@ -880,7 +885,7 @@ pub struct SearchEdge {
 
 impl SearchEdge {
     fn cost(self) -> u16 {
-        if self.disabled {u16::MAX} else {self.weight}
+        if self.disabled {1000} else {self.weight}
     }
 }
 
