@@ -151,6 +151,14 @@ impl Simulator {
         let mut traversal_order: Vec<TrackStationId> = Vec::new();
         let mut visited = HashSet::new();
 
+        let mut all_route_edges = HashSet::new();
+        
+        for route in &routes {
+            for edge in route.station_to.values() {
+                all_route_edges.insert(*edge);
+            }
+        }
+
         'bfs:
         while let Some(track_station) = queue.pop_front() {
             if visited.contains(&track_station) {
@@ -161,20 +169,13 @@ impl Simulator {
             // skip processing now, with the assumption that we'll be returning later. Note that this 
             // requires all meaningful tracks to be assigned to a route.
             if let TrackStationId::Station(station) = track_station {
-                for edge in subway_map.edges_directed(station, Direction::Outgoing).filter(|e| e.weight().ty == EdgeType::Track) {
+                for edge in subway_map.edges_directed(station, Direction::Outgoing).filter(|e| all_route_edges.contains(&e.id())) {
                     if !visited.contains(&TrackStationId::Track(edge.id())) {
                         continue 'bfs;
                     }
                 }
             }
             
-            let mut all_route_edges = HashSet::new();
-            
-            for route in &routes {
-                for edge in route.station_to.values() {
-                    all_route_edges.insert(*edge);
-                }
-            }
             
 
             
@@ -186,7 +187,7 @@ impl Simulator {
                     queue.push_back(TrackStationId::Station(source));
                 }
                 TrackStationId::Station(station) => subway_map
-                    .edges_directed(station, Direction::Incoming).filter(|edge| all_route_edges.contains(&edge.id()))
+                    .edges_directed(station, Direction::Incoming)
                     .for_each(|track| queue.push_back(TrackStationId::Track(track.id()))),
             }
         }
