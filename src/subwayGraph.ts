@@ -29,7 +29,6 @@ export const SubwayGraph = z.object({
         target: z.string(),
         weight: z.number(),
     })),
-    routes: Routes
 });
 export type SubwayGraph = z.infer<typeof SubwayGraph>;
 
@@ -37,6 +36,9 @@ export function defaultSubwayGraph(): SubwayGraph {
     return {
         nodes: [],
         edges: [],
-        routes: {},
     }
+}
+
+export function defaultRoutes(): Routes {
+    return {}
 }

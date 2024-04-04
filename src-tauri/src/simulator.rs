@@ -1172,8 +1172,8 @@ fn search_to_path(
     paths
 }
 
-const WALK_MULTIPLIER: f64 = 2.0;
-const WAIT_MULTIPLIER: f64 = 2.0;
+const WALK_MULTIPLIER: f64 = 1.0;
+const WAIT_MULTIPLIER: f64 = 1.0;
 
 fn calculate_costs(
     search_map: &mut SearchMap,
@@ -1185,7 +1185,7 @@ fn calculate_costs(
     for (time, trips) in trip_data.iter() {
         for trip in trips {
             // TODO do more than one path?
-            let paths = shortest_paths(trip.start, trip.end, search_map, 3);
+            let paths = shortest_paths(trip.start, trip.end, search_map, 1);
             assert!(!paths.is_empty());
             let mut lowest_cost = f64::INFINITY;
             'path: for path in paths.iter() {

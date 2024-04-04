@@ -266,7 +266,7 @@ async fn run_optimize(
     let (subway_map, cytoscape_id_map, petgraph_map) = js_graph_to_subway_map(js_graph.clone());
     let (routes, route_id_map) = js_routes_to_routes(js_routes, &subway_map, &cytoscape_id_map);
 
-    let mut rng = StdRng::seed_from_u64(5051);
+    let mut rng = StdRng::seed_from_u64(5050);
     let mut dfs_space = DfsSpace::new(&subway_map);
 
     let mut trip_data = TripData::new();

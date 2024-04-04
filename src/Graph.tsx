@@ -41,11 +41,13 @@ interface StationStatistic {
 
 type GraphProps = {
     initialSubwayGraph: SubwayGraph,
+    initialRoutes: Routes,
     mode: GraphMode,
     onShortestPath: (graph: any, routes: any, source: string, target: string) => void,
     onSimulate: (graph: any, routes: any, frequency: number) => Promise<SimulationResults>,
     onOptimize: (graph: any, routes: any) => Promise<SimulationResults>,
     getCurrentSubwayGraph?: MutableRefObject<() => SubwayGraph>,
+    getCurrentRoutes?: MutableRefObject<() => Routes>,
 }
 
 // escape -> clear selection, clear state 
@@ -56,11 +58,11 @@ type GraphProps = {
 
 type EditType = { type: 'edgeCreate', edgeSourceNode: NodeSingular } | { type: 'edgeWeight', edge: EdgeSingular, renderedX: number, renderedY: number, weight: string } | { type: 'nodeName', node: NodeSingular, renderedX: number, renderedY: number, name: string } | { type: 'none' };
 
-export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShortestPath, getCurrentSubwayGraph }: GraphProps) => {
+export const Graph = ({ initialSubwayGraph, initialRoutes, mode, onSimulate, onOptimize, onShortestPath, getCurrentSubwayGraph, getCurrentRoutes }: GraphProps) => {
     const divRef = useRef(null);
     const [graph, setGraph] = useState<Core | undefined>();
     const [editType, setEditType] = useState<EditType>({ type: 'none' });
-    const [routes, setRoutes] = useState<Routes>({});
+    const [routes, setRoutes] = useState<Routes>(initialRoutes);
     const [routeOffsets, setRouteOffsets] = useState<Record<string, number>>({});
     const [frequency, setFrequency] = useState("4");
     const [simulationResults, setSimulationResults] = useState<SimulationResults | null>(null);
@@ -74,9 +76,15 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShor
     // Update upstream graph with current graph state
     useEffect(() => {
         if (graph && getCurrentSubwayGraph) {
-            getCurrentSubwayGraph.current = () => graphToSubwayGraph(graph, routes);
+            getCurrentSubwayGraph.current = () => graphToSubwayGraph(graph);
         }
-    }, [graph, getCurrentSubwayGraph, routes]);
+    }, [graph, getCurrentSubwayGraph]);
+    
+    useEffect(() => {
+        if (getCurrentRoutes) {
+            getCurrentRoutes.current = () => routes;
+        }
+    }, [routes, getCurrentSubwayGraph])
 
     // Handle keyboard events
     useEffect(() => {
@@ -226,11 +234,15 @@ export const Graph = ({ initialSubwayGraph, mode, onSimulate, onOptimize, onShor
     useEffect(() => {
         if (graph && initialSubwayGraph) {
             initializeGraph(graph, initialSubwayGraph);
-            setRoutes(initialSubwayGraph.routes);
             graph.reset();
         }
         return () => { graph?.elements().remove(); }
     }, [graph, initialSubwayGraph])
+    
+    // On route change set the new routes
+    useEffect(() => {
+        setRoutes(initialRoutes);
+    }, [initialRoutes])
 
     // Handle node and edge clicks and double clicks
     useEffect(() => {
@@ -483,7 +495,7 @@ function initializeGraph(core: Core, subwayGraph: SubwayGraph) {
     }
 }
 
-function graphToSubwayGraph(core: Core, routes: SubwayGraph["routes"]): SubwayGraph {
+function graphToSubwayGraph(core: Core): SubwayGraph {
     const nodes = [];
     for (const node of core.nodes()) {
         if (node.data().type !== 'train' && node.indegree(false) + node.outdegree(false) !== 0) {
@@ -507,7 +519,6 @@ function graphToSubwayGraph(core: Core, routes: SubwayGraph["routes"]): SubwayGr
     return {
         nodes,
         edges,
-        routes,
     }
 }
 
