@@ -760,7 +760,7 @@ pub type TripData = HashMap<i64, Vec<Trip>>;
 // A map from route ids to scheduled times for the trains to depart
 type Schedule = HashMap<String, Vec<i64>>;
 
-pub const SCHEDULE_GRANULARITY: i64 = 30;
+pub const SCHEDULE_GRANULARITY: i64 = 10;
 pub const SCHEDULE_PERIOD: i64 = 120;
 
 type Frequencies = Vec<HashMap<String, Cell<i64>>>;
@@ -1202,7 +1202,6 @@ fn calculate_costs(
     let mut total_cost = 0.;
     for (time, trips) in trip_data.iter() {
         for trip in trips {
-            // TODO do more than one path?
             let paths = &shortest_paths[&(trip.start, trip.end)];
             assert!(!paths.is_empty());
             let mut lowest_cost = f64::INFINITY;

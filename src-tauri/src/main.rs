@@ -270,8 +270,9 @@ async fn run_optimize(
     let mut dfs_space = DfsSpace::new(&subway_map);
 
     let mut trip_data = TripData::new();
+    let mut num_trips = 0;
 
-    for _ in 0..SCHEDULE_GRANULARITY * SCHEDULE_PERIOD {
+    for _ in 0..30 * SCHEDULE_PERIOD {
         let start = subway_map.node_indices().choose(&mut rng).unwrap();
         let end = subway_map.node_indices().choose(&mut rng).unwrap();
 
@@ -285,8 +286,11 @@ async fn run_optimize(
                 .entry(rng.gen_range(0..SCHEDULE_PERIOD - SCHEDULE_GRANULARITY))
                 .or_default()
                 .push(trip);
+            num_trips += 1;
         }
     }
+    
+    println!("Using {num_trips} trips for optimization");
 
     let (schedule, simulation_results) = optimize(subway_map, routes, &trip_data);
 
