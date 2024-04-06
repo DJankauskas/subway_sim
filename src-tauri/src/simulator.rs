@@ -1075,20 +1075,34 @@ pub fn shortest_paths(
 
     let mut paths = Vec::new();
 
-    for segment in &path {
+    for (i, segment) in path.iter().enumerate() {
         if k == 0 {
             break;
         }
         
         let mut disabled_edges = Vec::new();
         
-        for neighbor in search_map.map.neighbors_undirected(segment.end_node) {
-            for edge in search_map.map.edges_connecting(segment.end_node, neighbor) {
-                if edge.weight().ty == EdgeType::Walk {
-                    disabled_edges.push(edge.id());
+        // If the segment is the last one in the path, then disabling walk edges at that node won't 
+        // work. Instead, disconnect the route edge to that node. Do this for all routes in the segment.
+        if i == path.len() - 1 {
+            let original_end_node = search_map.map[segment.end_node].old_node;
+            for new_node in &search_map.old_to_new_nodes[&original_end_node] {
+                if segment.routes.contains(&search_map.map[*new_node].route) {
+                    for edge in search_map.map.edges_directed(*new_node, Direction::Incoming) {
+                        disabled_edges.push(edge.id());
+                    }
                 }
             }
-        }        
+        } else {
+            for neighbor in search_map.map.neighbors_undirected(segment.end_node) {
+                for edge in search_map.map.edges_connecting(segment.end_node, neighbor) {
+                    if edge.weight().ty == EdgeType::Walk {
+                        disabled_edges.push(edge.id());
+                    }
+                }
+            }        
+        }
+        
         for edge in &disabled_edges {
             search_map.map[*edge].disabled = true;
         }

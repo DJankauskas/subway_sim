@@ -132,7 +132,7 @@ fn shortest_path(js_graph: JsGraph, js_routes: JsRoutes, source: String, target:
     let mut search_map = generate_shortest_path_search_map(&graph, &routes);
     let start = map[&source];
     let end = map[&target];
-    let paths = shortest_paths(start, end, &mut search_map, 1);
+    let paths = shortest_paths(start, end, &mut search_map, 3);
     println!("Shortest paths: {:?}", paths);
 }
 
