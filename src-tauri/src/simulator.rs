@@ -1225,7 +1225,7 @@ fn calculate_costs(
                 for segment in path {
                     let curr_schedule = curr_time as i64 / SCHEDULE_GRANULARITY;
                     // if the journey runs overtime stop considering subsequent segments
-                    if curr_schedule as usize >= frequencies.len() {
+                    if curr_schedule < 0 {
                         continue 'path;
                     }
                     let mut total_frequency = 0;
@@ -1236,7 +1236,7 @@ fn calculate_costs(
                         SCHEDULE_GRANULARITY as f64 / total_frequency as f64 * WAIT_MULTIPLIER;
                     let total_segment_cost = segment.cost as f64 + wait;
                     cost += total_segment_cost;
-                    curr_time += total_segment_cost;
+                    curr_time -= total_segment_cost;
                     if let Some(edge_idx) = segment.edge_to_next {
                         let walk_time = search_map
                             .map
@@ -1245,7 +1245,7 @@ fn calculate_costs(
                             .unwrap_or_default() as f64
                             * WALK_MULTIPLIER;
                         cost += walk_time;
-                        curr_time += walk_time;
+                        curr_time -= walk_time;
                     }
                 }
                 lowest_cost = lowest_cost.min(cost);

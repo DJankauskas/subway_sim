@@ -283,7 +283,7 @@ async fn run_optimize(
                 count: 1,
             };
             trip_data
-                .entry(rng.gen_range(0..SCHEDULE_PERIOD - SCHEDULE_GRANULARITY))
+                .entry(rng.gen_range(SCHEDULE_GRANULARITY*2..SCHEDULE_PERIOD))
                 .or_default()
                 .push(trip);
             num_trips += 1;
