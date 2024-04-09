@@ -794,7 +794,7 @@ pub fn optimize(
 
     let mut curr_simulation_results = None;
 
-    let mut search_map = generate_shortest_path_search_map(&subway_map, &routes);
+    let mut search_map = SearchMap::generate(&subway_map, &routes);
 
     let mut routes_vec = Vec::with_capacity(routes.len());
     for route in &routes {
@@ -809,7 +809,9 @@ pub fn optimize(
         for trip in trips {
             let key = (trip.start, trip.end);
             shortest_paths_cache.entry(key).or_insert_with(|| {
-                shortest_paths(trip.start, trip.end, &mut search_map, 1)
+                let paths = shortest_paths(trip.start, trip.end, &mut search_map, 1);
+                assert!(!paths.is_empty());
+                paths
             });
         }
     }
@@ -920,95 +922,94 @@ pub struct SearchMap {
     new_to_old_edges: HashMap<EdgeIndex, EdgeIndex>,
 }
 
-// Maps a subway map to a form that is more amenable to searching for best routes.
-// Each route is given its own nodes and edges, but if multiple routes share nodes in the actual
-// map, they will be connected with walk edges.
-pub fn generate_shortest_path_search_map(
-    subway_map: &SubwayMap,
-    routes: &[Route],
-) -> SearchMap {
-    let mut search_map = SearchGraph::new();
-    let mut old_to_new_nodes = HashMap::new();
-    let mut old_to_new_edges = HashMap::new();
-    let mut new_to_old_edges = HashMap::new();
+impl SearchMap {
+    // Maps a subway map to a form that is more amenable to searching for best routes.
+    // Each route is given its own nodes and edges, but if multiple routes share nodes in the actual
+    // map, they will be connected with walk edges.
+    pub fn generate(subway_map: &SubwayMap, routes: &[Route]) -> Self {
+        let mut search_map = SearchGraph::new();
+        let mut old_to_new_nodes = HashMap::new();
+        let mut old_to_new_edges = HashMap::new();
+        let mut new_to_old_edges = HashMap::new();
 
-    let mut route_old_to_new_nodes = HashMap::new();
+        let mut route_old_to_new_nodes = HashMap::new();
 
-    // For each route create nodes and edges for it
-    for route in routes {
-        let mut create_node = |old_node: NodeIndex, search_map: &mut SearchGraph| -> NodeIndex {
-            match route_old_to_new_nodes.get(&(&route.name, old_node)) {
-                Some(node) => *node,
-                None => {
-                    let new_nodes = old_to_new_nodes.entry(old_node).or_insert(Vec::new());
-                    let route_node = search_map.add_node(SearchNode {
-                        route: route.name.clone(),
-                        old_node,
-                    });
-                    new_nodes.push(route_node);
-                    route_old_to_new_nodes.insert((&route.name, old_node), route_node);
-                    route_node
+        // For each route create nodes and edges for it
+        for route in routes {
+            let mut create_node = |old_node: NodeIndex, search_map: &mut SearchGraph| -> NodeIndex {
+                match route_old_to_new_nodes.get(&(&route.name, old_node)) {
+                    Some(node) => *node,
+                    None => {
+                        let new_nodes = old_to_new_nodes.entry(old_node).or_insert(Vec::new());
+                        let route_node = search_map.add_node(SearchNode {
+                            route: route.name.clone(),
+                            old_node,
+                        });
+                        new_nodes.push(route_node);
+                        route_old_to_new_nodes.insert((&route.name, old_node), route_node);
+                        route_node
+                    }
                 }
-            }
-        };
+            };
 
-        for edge in route.station_to.values() {
-            let (start, end) = subway_map.edge_endpoints(*edge).unwrap();
-            let new_start_node = create_node(start, &mut search_map);
-            let new_end_node = create_node(end, &mut search_map);
-            let new_edge = search_map.add_edge(new_start_node, new_end_node, subway_map[*edge].into());
-            old_to_new_edges
-                .entry(*edge)
-                .or_insert(Vec::new())
-                .push(new_edge);
-            new_to_old_edges.insert(new_edge, *edge);
-        }
-    }
-
-    // Connect virtual nodes that correspond to the same station together with walk edges. This
-    // represents the transfer necessary to move between routes
-    for related_nodes in old_to_new_nodes.values() {
-        for i in 0..related_nodes.len() - 1 {
-            for j in i + 1..related_nodes.len() {
-                search_map.add_edge(
-                    related_nodes[i],
-                    related_nodes[j],
-                    SearchEdge {
-                        ty: crate::EdgeType::Walk,
-                        weight: 1,
-                        disabled: false,
-                    },
-                );
+            for edge in route.station_to.values() {
+                let (start, end) = subway_map.edge_endpoints(*edge).unwrap();
+                let new_start_node = create_node(start, &mut search_map);
+                let new_end_node = create_node(end, &mut search_map);
+                let new_edge = search_map.add_edge(new_start_node, new_end_node, subway_map[*edge].into());
+                old_to_new_edges
+                    .entry(*edge)
+                    .or_insert(Vec::new())
+                    .push(new_edge);
+                new_to_old_edges.insert(new_edge, *edge);
             }
         }
-    }
 
-    // Create corresponding walk edges for those found on the original graph
-    for edge in subway_map.edge_references() {
-        if let EdgeType::Walk = edge.weight().ty {
-            let node1 = edge.source();
-            let node2 = edge.target();
-            // ignore cases where no routes in the network use a station node
-            if !(old_to_new_nodes.contains_key(&node1) && old_to_new_nodes.contains_key(&node2)) {
-                continue;
-            }
-            let new_nodes1 = &old_to_new_nodes[&node1];
-            let new_nodes2 = &old_to_new_nodes[&node2];
-            // TODO: this causes quadratic blowup of walk edge numbers which is sometimes excessive.
-            // Is this too aggressive? Can we just create one edge instead?
-            for node1 in new_nodes1 {
-                for node2 in new_nodes2 {
-                    search_map.add_edge(*node1, *node2, (*edge.weight()).into());
+        // Connect virtual nodes that correspond to the same station together with walk edges. This
+        // represents the transfer necessary to move between routes
+        for related_nodes in old_to_new_nodes.values() {
+            for i in 0..related_nodes.len() - 1 {
+                for j in i + 1..related_nodes.len() {
+                    search_map.add_edge(
+                        related_nodes[i],
+                        related_nodes[j],
+                        SearchEdge {
+                            ty: crate::EdgeType::Walk,
+                            weight: 1,
+                            disabled: false,
+                        },
+                    );
                 }
             }
         }
-    }
 
-    SearchMap {
-        map: search_map,
-        old_to_new_nodes,
-        old_to_new_edges,
-        new_to_old_edges,
+        // Create corresponding walk edges for those found on the original graph
+        for edge in subway_map.edge_references() {
+            if let EdgeType::Walk = edge.weight().ty {
+                let node1 = edge.source();
+                let node2 = edge.target();
+                // ignore cases where no routes in the network use a station node
+                if !(old_to_new_nodes.contains_key(&node1) && old_to_new_nodes.contains_key(&node2)) {
+                    continue;
+                }
+                let new_nodes1 = &old_to_new_nodes[&node1];
+                let new_nodes2 = &old_to_new_nodes[&node2];
+                // TODO: this causes quadratic blowup of walk edge numbers which is sometimes excessive.
+                // Is this too aggressive? Can we just create one edge instead?
+                for node1 in new_nodes1 {
+                    for node2 in new_nodes2 {
+                        search_map.add_edge(*node1, *node2, (*edge.weight()).into());
+                    }
+                }
+            }
+        }
+
+        SearchMap {
+            map: search_map,
+            old_to_new_nodes,
+            old_to_new_edges,
+            new_to_old_edges,
+        }
     }
 }
 
@@ -1065,7 +1066,7 @@ pub fn shortest_paths(
     );
     let destination = match destination {
         Terminated::Exhaustive => {
-            panic!("did not encounter the desired destination in shortest path search")
+            return Vec::new();
         }
         Terminated::At(destination) => destination,
     };
