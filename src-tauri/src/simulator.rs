@@ -152,33 +152,32 @@ impl Simulator {
         let mut visited = HashSet::new();
 
         let mut all_route_edges = HashSet::new();
-        
+
         for route in &routes {
             for edge in route.station_to.values() {
                 all_route_edges.insert(*edge);
             }
         }
 
-        'bfs:
-        while let Some(track_station) = queue.pop_front() {
+        'bfs: while let Some(track_station) = queue.pop_front() {
             if visited.contains(&track_station) {
                 continue;
             };
-            
+
             // If we get to a station where some of the edges it feeds into haven't been processed yet,
-            // skip processing now, with the assumption that we'll be returning later. Note that this 
+            // skip processing now, with the assumption that we'll be returning later. Note that this
             // requires all meaningful tracks to be assigned to a route.
             if let TrackStationId::Station(station) = track_station {
-                for edge in subway_map.edges_directed(station, Direction::Outgoing).filter(|e| all_route_edges.contains(&e.id())) {
+                for edge in subway_map
+                    .edges_directed(station, Direction::Outgoing)
+                    .filter(|e| all_route_edges.contains(&e.id()))
+                {
                     if !visited.contains(&TrackStationId::Track(edge.id())) {
                         continue 'bfs;
                     }
                 }
             }
-            
-            
 
-            
             visited.insert(track_station);
             traversal_order.push(track_station);
             match track_station {
@@ -228,7 +227,7 @@ impl Simulator {
             let distance_travelled = f64_max(STATION_DWELL_TIME - train_mut.pos, 0.0);
             train_mut.pos += distance_travelled;
             time_left -= distance_travelled;
-            
+
             if train_mut.pos < STATION_DWELL_TIME {
                 return;
             }
@@ -291,8 +290,10 @@ impl Simulator {
                         while i < self.tracks.get_mut(&track).unwrap().trains.len() {
                             let track_mut = self.tracks.get_mut(&track).unwrap();
                             if self.stations[&next_station_id].train.is_some() {
-                                last_train_pos =
-                                    f64_min(f64_max(track_mut.length as f64 - MIN_TRAIN_DISTANCE, 0.0), last_train_pos);
+                                last_train_pos = f64_min(
+                                    f64_max(track_mut.length as f64 - MIN_TRAIN_DISTANCE, 0.0),
+                                    last_train_pos,
+                                );
                             }
                             let curr_train_id = track_mut.trains[i];
                             let curr_train_mut = self.trains.get_mut(&curr_train_id).unwrap();
@@ -467,15 +468,31 @@ impl Simulator {
                 let end_time = start_time + SCHEDULE_GRANULARITY;
 
                 for i in 0..freq[&route.name] {
-                    let var =
-                        z3::ast::Int::new_const(&z3_context, format!("{}_{}", id.0, i + curr_idx));
-                    let next_var = z3::ast::Int::new_const(
-                        &z3_context,
-                        format!("{}_{}", id.0, i + curr_idx + 1),
+                    let curr_train = TrainId {
+                        route_idx: id.0,
+                        count: (i + curr_idx) as u32,
+                    }
+                    .to_z3_departure(&z3_context);
+                    let next_train = TrainId {
+                        route_idx: id.0,
+                        count: (i + curr_idx + 1) as u32,
+                    }
+                    .to_z3_departure(&z3_context);
+
+                    z3_solver.assert(
+                        &z3::ast::Int::add(
+                            &z3_context,
+                            &[
+                                &curr_train,
+                                &z3::ast::Int::from_u64(&z3_context, MIN_TRAIN_DISTANCE as u64),
+                            ],
+                        )
+                        .le(&next_train),
                     );
-                    z3_solver.assert(&var.lt(&next_var));
-                    z3_solver.assert(&var.ge(&z3::ast::Int::from_i64(&z3_context, start_time)));
-                    z3_solver.assert(&var.lt(&z3::ast::Int::from_i64(&z3_context, end_time)));
+                    z3_solver
+                        .assert(&curr_train.ge(&z3::ast::Int::from_i64(&z3_context, start_time)));
+                    z3_solver
+                        .assert(&curr_train.lt(&z3::ast::Int::from_i64(&z3_context, end_time)));
                 }
 
                 start_time = end_time;
@@ -511,8 +528,10 @@ impl Simulator {
                         while i < self.tracks.get_mut(&track).unwrap().trains.len() {
                             let track_mut = self.tracks.get_mut(&track).unwrap();
                             if self.stations[&next_station_id].train.is_some() {
-                                last_train_pos =
-                                    f64_min(f64_max(track_mut.length as f64 - MIN_TRAIN_DISTANCE, 0.0), last_train_pos);
+                                last_train_pos = f64_min(
+                                    f64_max(track_mut.length as f64 - MIN_TRAIN_DISTANCE, 0.0),
+                                    last_train_pos,
+                                );
                             }
                             let curr_train_id = track_mut.trains[i];
                             let curr_train_mut = self.trains.get_mut(&curr_train_id).unwrap();
@@ -574,7 +593,7 @@ impl Simulator {
                                     }
                                     Some(conflicting_train) => {
                                         // MERGE CONFLICT
-                                        
+
                                         // TODO choose lesser of times
                                         let scheduled_at = train_scheduled_at[&curr_train_id];
                                         t = scheduled_at;
@@ -769,7 +788,7 @@ pub fn optimize(
     subway_map: SubwayMap,
     routes: Vec<Route>,
     trip_data: &TripData,
-    shortest_paths: &HashMap<(NodeIndex, NodeIndex), Vec<Vec<PathSegment>>>
+    shortest_paths: &HashMap<(NodeIndex, NodeIndex), Vec<Vec<PathSegment>>>,
 ) -> (Schedule, Option<SimulationResults>) {
     let mut frequencies: Frequencies =
         Vec::with_capacity((SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) as usize);
@@ -792,7 +811,7 @@ pub fn optimize(
             vec![1; (SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) as usize],
         );
     }
-    
+
     let mut curr_simulation_results = None;
 
     let mut search_map = SearchMap::generate(&subway_map, &routes);
@@ -802,7 +821,7 @@ pub fn optimize(
         routes_vec.push(route.clone());
     }
     let mut simulator = Simulator::new(subway_map, routes_vec);
-    
+
     loop {
         let mut best_fragment = None;
         let mut lowest_cost = f64::INFINITY;
@@ -816,8 +835,13 @@ pub fn optimize(
                 }
                 frequency.set(frequency.get() + 1);
                 // calculate cost if frequency goes up by increment of 1
-                let estimated_cost =
-                    calculate_costs(&mut search_map, &frequencies, &routes, trip_data, shortest_paths);
+                let estimated_cost = calculate_costs(
+                    &mut search_map,
+                    &frequencies,
+                    &routes,
+                    trip_data,
+                    shortest_paths,
+                );
                 if estimated_cost < lowest_cost {
                     lowest_cost = estimated_cost;
                     best_fragment = Some((time, id.clone()));
@@ -886,7 +910,11 @@ pub struct SearchEdge {
 
 impl SearchEdge {
     fn cost(self) -> u16 {
-        if self.disabled {1000} else {self.weight}
+        if self.disabled {
+            1000
+        } else {
+            self.weight
+        }
     }
 }
 
@@ -923,27 +951,29 @@ impl SearchMap {
 
         // For each route create nodes and edges for it
         for route in routes {
-            let mut create_node = |old_node: NodeIndex, search_map: &mut SearchGraph| -> NodeIndex {
-                match route_old_to_new_nodes.get(&(&route.name, old_node)) {
-                    Some(node) => *node,
-                    None => {
-                        let new_nodes = old_to_new_nodes.entry(old_node).or_insert(Vec::new());
-                        let route_node = search_map.add_node(SearchNode {
-                            route: route.name.clone(),
-                            old_node,
-                        });
-                        new_nodes.push(route_node);
-                        route_old_to_new_nodes.insert((&route.name, old_node), route_node);
-                        route_node
+            let mut create_node =
+                |old_node: NodeIndex, search_map: &mut SearchGraph| -> NodeIndex {
+                    match route_old_to_new_nodes.get(&(&route.name, old_node)) {
+                        Some(node) => *node,
+                        None => {
+                            let new_nodes = old_to_new_nodes.entry(old_node).or_insert(Vec::new());
+                            let route_node = search_map.add_node(SearchNode {
+                                route: route.name.clone(),
+                                old_node,
+                            });
+                            new_nodes.push(route_node);
+                            route_old_to_new_nodes.insert((&route.name, old_node), route_node);
+                            route_node
+                        }
                     }
-                }
-            };
+                };
 
             for edge in route.station_to.values() {
                 let (start, end) = subway_map.edge_endpoints(*edge).unwrap();
                 let new_start_node = create_node(start, &mut search_map);
                 let new_end_node = create_node(end, &mut search_map);
-                let new_edge = search_map.add_edge(new_start_node, new_end_node, subway_map[*edge].into());
+                let new_edge =
+                    search_map.add_edge(new_start_node, new_end_node, subway_map[*edge].into());
                 old_to_new_edges
                     .entry(*edge)
                     .or_insert(Vec::new())
@@ -976,7 +1006,8 @@ impl SearchMap {
                 let node1 = edge.source();
                 let node2 = edge.target();
                 // ignore cases where no routes in the network use a station node
-                if !(old_to_new_nodes.contains_key(&node1) && old_to_new_nodes.contains_key(&node2)) {
+                if !(old_to_new_nodes.contains_key(&node1) && old_to_new_nodes.contains_key(&node2))
+                {
                     continue;
                 }
                 let new_nodes1 = &old_to_new_nodes[&node1];
@@ -1067,16 +1098,19 @@ pub fn shortest_paths(
         if k == 0 {
             break;
         }
-        
+
         let mut disabled_edges = Vec::new();
-        
-        // If the segment is the last one in the path, then disabling walk edges at that node won't 
+
+        // If the segment is the last one in the path, then disabling walk edges at that node won't
         // work. Instead, disconnect the route edge to that node. Do this for all routes in the segment.
         if i == path.len() - 1 {
             let original_end_node = search_map.map[segment.end_node].old_node;
             for new_node in &search_map.old_to_new_nodes[&original_end_node] {
                 if segment.routes.contains(&search_map.map[*new_node].route) {
-                    for edge in search_map.map.edges_directed(*new_node, Direction::Incoming) {
+                    for edge in search_map
+                        .map
+                        .edges_directed(*new_node, Direction::Incoming)
+                    {
                         disabled_edges.push(edge.id());
                     }
                 }
@@ -1088,9 +1122,9 @@ pub fn shortest_paths(
                         disabled_edges.push(edge.id());
                     }
                 }
-            }        
+            }
         }
-        
+
         for edge in &disabled_edges {
             search_map.map[*edge].disabled = true;
         }
@@ -1118,7 +1152,7 @@ pub fn shortest_paths(
     paths.push(path);
 
     search_map.map.remove_node(virtual_start_node);
-    
+
     paths
 }
 
@@ -1205,7 +1239,7 @@ fn calculate_time_to(search_map: &SearchMap, mut node: NodeIndex) -> f64 {
                 break;
             }
         }
-        
+
         if new_node != node {
             node = new_node;
         } else {
@@ -1219,7 +1253,7 @@ fn calculate_costs(
     frequencies: &[HashMap<String, Cell<i64>>],
     routes: &[Route],
     trip_data: &TripData,
-    shortest_paths: &HashMap<(NodeIndex, NodeIndex), Vec<Vec<PathSegment>>>
+    shortest_paths: &HashMap<(NodeIndex, NodeIndex), Vec<Vec<PathSegment>>>,
 ) -> f64 {
     let mut total_cost = 0.;
 
@@ -1239,15 +1273,20 @@ fn calculate_costs(
                 for segment in path {
                     let mut total_frequency = 0;
                     for route in &segment.routes {
-                        let time_to_start = *time_to_cache.get_mut(route).unwrap().entry(segment.start_node).or_insert_with(|| calculate_time_to(&search_map, segment.start_node));
-                        let curr_schedule = (curr_time as i64 - time_to_start as i64)  / SCHEDULE_GRANULARITY;
+                        let time_to_start = *time_to_cache
+                            .get_mut(route)
+                            .unwrap()
+                            .entry(segment.start_node)
+                            .or_insert_with(|| calculate_time_to(&search_map, segment.start_node));
+                        let curr_schedule =
+                            (curr_time as i64 - time_to_start as i64) / SCHEDULE_GRANULARITY;
                         if curr_schedule < 0 || curr_schedule >= frequencies.len() as i64 {
                             // if the journey runs overtime stop considering subsequent segments
                             continue;
                         }
                         total_frequency += frequencies[curr_schedule as usize][route].get();
                     }
-                    
+
                     if total_frequency == 0 {
                         continue 'path;
                     }
