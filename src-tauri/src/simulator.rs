@@ -769,6 +769,7 @@ pub fn optimize(
     subway_map: SubwayMap,
     routes: Vec<Route>,
     trip_data: &TripData,
+    shortest_paths: &HashMap<(NodeIndex, NodeIndex), Vec<Vec<PathSegment>>>
 ) -> (Schedule, Option<SimulationResults>) {
     let mut frequencies: Frequencies =
         Vec::with_capacity((SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) as usize);
@@ -802,20 +803,6 @@ pub fn optimize(
     }
     let mut simulator = Simulator::new(subway_map, routes_vec);
     
-    // cache shortest paths
-    let mut shortest_paths_cache = HashMap::new();
-    
-    for trips in trip_data.values() {
-        for trip in trips {
-            let key = (trip.start, trip.end);
-            shortest_paths_cache.entry(key).or_insert_with(|| {
-                let paths = shortest_paths(trip.start, trip.end, &mut search_map, 1);
-                assert!(!paths.is_empty());
-                paths
-            });
-        }
-    }
-
     loop {
         let mut best_fragment = None;
         let mut lowest_cost = f64::INFINITY;
@@ -830,7 +817,7 @@ pub fn optimize(
                 frequency.set(frequency.get() + 1);
                 // calculate cost if frequency goes up by increment of 1
                 let estimated_cost =
-                    calculate_costs(&mut search_map, &frequencies, &routes, trip_data, &shortest_paths_cache);
+                    calculate_costs(&mut search_map, &frequencies, &routes, trip_data, shortest_paths);
                 if estimated_cost < lowest_cost {
                     lowest_cost = estimated_cost;
                     best_fragment = Some((time, id.clone()));

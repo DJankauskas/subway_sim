@@ -272,12 +272,16 @@ async fn run_optimize(
     let mut num_trips = 0;
     
     let mut search_map = SearchMap::generate(&subway_map, &routes);
+    
+    let mut shortest_paths_cache = HashMap::new();
 
     for _ in 0..30 * SCHEDULE_PERIOD {
         let start = subway_map.node_indices().choose(&mut rng).unwrap();
         let end = subway_map.node_indices().choose(&mut rng).unwrap();
         
-        if !shortest_paths(start, end, &mut search_map, 1).is_empty() {
+        let paths = shortest_paths(start, end, &mut search_map, 3);
+        
+        if !paths.is_empty() {
             let trip = Trip { start,
                 end,
                 count: 1,
@@ -287,12 +291,14 @@ async fn run_optimize(
                 .or_default()
                 .push(trip);
             num_trips += 1;
+            
+            shortest_paths_cache.insert((start,end), paths);
         }
     }
     
     println!("Using {num_trips} trips for optimization");
 
-    let (schedule, simulation_results) = optimize(subway_map, routes, &trip_data);
+    let (schedule, simulation_results) = optimize(subway_map, routes, &trip_data, &shortest_paths_cache);
 
     println!("Found schedule: {:#?}", schedule);
 
