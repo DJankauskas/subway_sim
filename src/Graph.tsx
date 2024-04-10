@@ -482,7 +482,7 @@ const GraphPropertyInput = ({ type, value, onChange, onSubmit, onCancel: onClose
             // TODO: fix document key handling doing things to edit boxes without this hack
             e.stopPropagation();
         }}
-        style={{ position: 'absolute', width: 50, left: x, right: y }}
+        style={{ position: 'absolute', width: 50, left: x, top: y + 20 }}
     />
 );
 

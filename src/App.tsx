@@ -91,7 +91,7 @@ function App() {
             }
           }}>Save Layout</button>
         </div>
-        <div>
+        <div style={{marginTop: 5}}>
           <button onClick={async () => {
             const filePath = await open({
               filters: [{ name: "Subway Routes", extensions: ["json"] }]
