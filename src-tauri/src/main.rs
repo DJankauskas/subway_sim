@@ -4,7 +4,6 @@
 mod shortest_path;
 mod simulator;
 
-use petgraph::algo::{has_path_connecting, DfsSpace};
 use simulator::{
     optimize, shortest_paths, Route, SimulationResults,
     Simulator, SubwayMap, TrackStationId, SCHEDULE_PERIOD,

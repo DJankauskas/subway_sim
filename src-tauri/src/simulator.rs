@@ -574,8 +574,8 @@ impl Simulator {
                                     }
                                     Some(conflicting_train) => {
                                         // MERGE CONFLICT
-                                        // todo random chance of allowing the merge conflict instead, and
-                                        // continuing
+                                        
+                                        // TODO choose lesser of times
                                         let scheduled_at = train_scheduled_at[&curr_train_id];
                                         t = scheduled_at;
                                         let num_states_removed =
@@ -792,7 +792,7 @@ pub fn optimize(
             vec![1; (SCHEDULE_PERIOD / SCHEDULE_GRANULARITY) as usize],
         );
     }
-
+    
     let mut curr_simulation_results = None;
 
     let mut search_map = SearchMap::generate(&subway_map, &routes);
@@ -1194,6 +1194,26 @@ fn search_to_path(
 const WALK_MULTIPLIER: f64 = 1.0;
 const WAIT_MULTIPLIER: f64 = 1.0;
 
+fn calculate_time_to(search_map: &SearchMap, mut node: NodeIndex) -> f64 {
+    let mut time = 0.;
+    loop {
+        let mut new_node = node;
+        for edge in search_map.map.edges_directed(node, Direction::Incoming) {
+            if edge.weight().ty == EdgeType::Track {
+                time += edge.weight().weight as f64 + STATION_DWELL_TIME;
+                new_node = edge.source();
+                break;
+            }
+        }
+        
+        if new_node != node {
+            node = new_node;
+        } else {
+            return time;
+        }
+    }
+}
+
 fn calculate_costs(
     search_map: &mut SearchMap,
     frequencies: &[HashMap<String, Cell<i64>>],
@@ -1202,6 +1222,12 @@ fn calculate_costs(
     shortest_paths: &HashMap<(NodeIndex, NodeIndex), Vec<Vec<PathSegment>>>
 ) -> f64 {
     let mut total_cost = 0.;
+
+    let mut time_to_cache = HashMap::with_capacity(routes.len());
+    for route in routes {
+        time_to_cache.insert(route.name.clone(), HashMap::new());
+    }
+
     for (time, trips) in trip_data.iter() {
         for trip in trips {
             let paths = &shortest_paths[&(trip.start, trip.end)];
@@ -1211,20 +1237,26 @@ fn calculate_costs(
                 let mut curr_time = *time as f64;
                 let mut cost = 0.;
                 for segment in path {
-                    let curr_schedule = curr_time as i64 / SCHEDULE_GRANULARITY;
-                    // if the journey runs overtime stop considering subsequent segments
-                    if curr_schedule < 0 {
-                        continue 'path;
-                    }
                     let mut total_frequency = 0;
                     for route in &segment.routes {
+                        let time_to_start = *time_to_cache.get_mut(route).unwrap().entry(segment.start_node).or_insert_with(|| calculate_time_to(&search_map, segment.start_node));
+                        let curr_schedule = (curr_time as i64 - time_to_start as i64)  / SCHEDULE_GRANULARITY;
+                        if curr_schedule < 0 || curr_schedule >= frequencies.len() as i64 {
+                            // if the journey runs overtime stop considering subsequent segments
+                            continue;
+                        }
                         total_frequency += frequencies[curr_schedule as usize][route].get();
                     }
+                    
+                    if total_frequency == 0 {
+                        continue 'path;
+                    }
+
                     let wait =
                         SCHEDULE_GRANULARITY as f64 / total_frequency as f64 * WAIT_MULTIPLIER;
                     let total_segment_cost = segment.cost as f64 + wait;
                     cost += total_segment_cost;
-                    curr_time -= total_segment_cost;
+                    curr_time += total_segment_cost;
                     if let Some(edge_idx) = segment.edge_to_next {
                         let walk_time = search_map
                             .map
@@ -1233,7 +1265,7 @@ fn calculate_costs(
                             .unwrap_or_default() as f64
                             * WALK_MULTIPLIER;
                         cost += walk_time;
-                        curr_time -= walk_time;
+                        curr_time += walk_time;
                     }
                 }
                 lowest_cost = lowest_cost.min(cost);
