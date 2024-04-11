@@ -187,6 +187,7 @@ impl Simulator {
                 }
                 TrackStationId::Station(station) => subway_map
                     .edges_directed(station, Direction::Incoming)
+                    .filter(|edge| all_route_edges.contains(&edge.id()))
                     .for_each(|track| queue.push_back(TrackStationId::Track(track.id()))),
             }
         }
@@ -224,7 +225,7 @@ impl Simulator {
         if let Some(train) = &self.stations[&station].train {
             let train = *train;
             let train_mut = self.trains.get_mut(&train).unwrap();
-            let distance_travelled = f64_max(STATION_DWELL_TIME - train_mut.pos, 0.0);
+            let distance_travelled = f64_max(f64_min(STATION_DWELL_TIME - train_mut.pos, time_left), 0.0);
             train_mut.pos += distance_travelled;
             time_left -= distance_travelled;
 
@@ -250,7 +251,7 @@ impl Simulator {
                 if last_train_pos >= MIN_TRAIN_DISTANCE {
                     self.stations.get_mut(&station).unwrap().train = None;
                     next_track.trains.push_back(train);
-                    let pos_move = f64_min(time_left, last_train_pos - MIN_TRAIN_DISTANCE);
+                    let pos_move = f64_min(time_left, last_train_pos - MIN_TRAIN_DISTANCE).max(0.0);
                     let train_mut = self.trains.get_mut(&train).unwrap();
                     train_mut.pos = pos_move;
                     train_mut.distance_travelled += STATION_DWELL_TIME;
@@ -592,6 +593,7 @@ impl Simulator {
                                         // a separate function, tbd
                                     }
                                     Some(conflicting_train) => {
+                                        panic!("wait how are we getting here?");
                                         // MERGE CONFLICT
 
                                         // TODO choose lesser of times
