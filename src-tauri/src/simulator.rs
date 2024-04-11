@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::cmp::max;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 
@@ -515,6 +516,7 @@ impl Simulator {
 
         'iteration: while t < iterations {
             states.push((self.clone(), frequencies.clone()));
+            assert_eq!(states.len(), t as usize + 1);
             z3_solver.push();
 
             for track_station in &traversal_order {
@@ -537,6 +539,60 @@ impl Simulator {
                             let curr_train_id = track_mut.trains[i];
                             let curr_train_mut = self.trains.get_mut(&curr_train_id).unwrap();
                             let mut time_left = TIME_STEP;
+                            
+                            if last_train_pos - MIN_TRAIN_DISTANCE <  curr_train_mut.pos + time_left {
+                                // MERGE CONFLICT
+                                
+                                let conflicting_train = if track_mut.trains.len() > i + 1 {
+                                    track_mut.trains[i+1]
+                                } else {
+                                    self.stations[&next_station_id].train.unwrap()
+                                };
+                                
+                                let scheduled_at = max(train_scheduled_at[&curr_train_id], train_scheduled_at[&conflicting_train]);
+                                t = scheduled_at;
+                                let num_states_removed =
+                                    states.len() - scheduled_at as usize;
+                                states.drain(scheduled_at as usize + 1..);
+                                let prev_state = states.pop().unwrap();
+
+                                *self = prev_state.0;
+                                frequencies = prev_state.1;
+
+                                train_positions.retain(|p: &TrainPositions| {
+                                    (p.time as i32) < scheduled_at
+                                });
+
+                                // restore solver state to the iteration we're returning to
+                                z3_solver.pop(num_states_removed as u32);
+
+                                // TODO quadratic performance, FIXME
+                                for assertion in &permanent_assertions {
+                                    z3_solver.assert(assertion);
+                                }
+                                // encode conflict
+                                let conflicting_train_scheduled_at = conflicting_train
+                                    .to_z3_departure(&z3_context)
+                                    ._eq(&z3::ast::Int::from_i64(
+                                        &z3_context,
+                                        train_scheduled_at[&conflicting_train] as i64,
+                                    ));
+                                let assertion = conflicting_train_scheduled_at.implies(
+                                    &curr_train_id
+                                        .to_z3_departure(&z3_context)
+                                        ._eq(&z3::ast::Int::from_i64(
+                                            &z3_context,
+                                            train_scheduled_at[&curr_train_id] as i64,
+                                        ))
+                                        .not(),
+                                );
+                                z3_solver.assert(&assertion);
+                                permanent_assertions.push(assertion);
+
+                                continue 'iteration;
+
+                            }
+
                             let travel_distance = f64_min(
                                 f64_min(
                                     time_left,
@@ -551,6 +607,7 @@ impl Simulator {
                                     0.0,
                                 ),
                             );
+                            
                             curr_train_mut.pos += travel_distance;
                             time_left -= travel_distance;
                             // we're done with the current track, and need to move into the station
@@ -781,7 +838,7 @@ pub type TripData = HashMap<i64, Vec<Trip>>;
 // A map from route ids to scheduled times for the trains to depart
 type Schedule = HashMap<String, Vec<i64>>;
 
-pub const SCHEDULE_GRANULARITY: i64 = 10;
+pub const SCHEDULE_GRANULARITY: i64 = 30;
 pub const SCHEDULE_PERIOD: i64 = 120;
 
 type Frequencies = Vec<HashMap<String, Cell<i64>>>;
