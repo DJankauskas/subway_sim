@@ -1,5 +1,5 @@
 use std::cell::Cell;
-use std::cmp::max;
+use std::cmp::{max, min};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 
@@ -435,20 +435,15 @@ impl Simulator {
 
     // This is mostly a copy paste of the run function right now.
     // TODO figure out how to consolidate code with run
-    pub fn hyper_hacky_schedule_trains(
+    pub fn hyper_hacky_schedule_trains<'a>(
         &mut self,
         iterations: i32,
         desired_frequencies: &Frequencies,
-    ) -> Option<SimulationResults> {
-        // use z3 SMT to calculate train position bounds
-        // details: each train is scheduled to depart at an integer time.
-        // the ith train for route r has a variable called r_i
-        // we get train departure times from z3. Any time we observe a conflict, we
-        // add a rule probibiting the cause of the conflict, then jump back in time before the
-        // conflict occurred.
-        let z3_config = z3::Config::new();
-        let z3_context = z3::Context::new(&z3_config);
-        let z3_solver = z3::Solver::new(&z3_context);
+        z3_context: &'a z3::Context,
+        conflicts: &[z3::ast::Bool]
+    ) -> Option<(SimulationResults, Vec<z3::ast::Bool<'a>>)> {
+
+        let z3_solver = z3::Solver::new(z3_context);
 
         let mut frequencies = Vec::with_capacity(desired_frequencies.len());
         for period in desired_frequencies {
@@ -501,6 +496,10 @@ impl Simulator {
                 curr_idx += freq[&route.name];
             }
         }
+        
+        for conflict in conflicts {
+            z3_solver.assert(conflict);
+        }
 
         let mut train_to_route = HashMap::new();
         let traversal_order = self.traversal_order.clone();
@@ -512,7 +511,7 @@ impl Simulator {
         let mut train_scheduled_at = HashMap::new();
         let mut states = Vec::with_capacity(iterations as usize);
 
-        let mut permanent_assertions = Vec::new();
+        let mut new_conflicts = Vec::new();
 
         'iteration: while t < iterations {
             states.push((self.clone(), frequencies.clone()));
@@ -549,7 +548,7 @@ impl Simulator {
                                     self.stations[&next_station_id].train.unwrap()
                                 };
                                 
-                                let scheduled_at = max(train_scheduled_at[&curr_train_id], train_scheduled_at[&conflicting_train]);
+                                let scheduled_at = min(train_scheduled_at[&curr_train_id], train_scheduled_at[&conflicting_train]);
                                 t = scheduled_at;
                                 let num_states_removed =
                                     states.len() - scheduled_at as usize;
@@ -567,7 +566,7 @@ impl Simulator {
                                 z3_solver.pop(num_states_removed as u32);
 
                                 // TODO quadratic performance, FIXME
-                                for assertion in &permanent_assertions {
+                                for assertion in &new_conflicts {
                                     z3_solver.assert(assertion);
                                 }
                                 // encode conflict
@@ -587,7 +586,7 @@ impl Simulator {
                                         .not(),
                                 );
                                 z3_solver.assert(&assertion);
-                                permanent_assertions.push(assertion);
+                                new_conflicts.push(assertion);
 
                                 continue 'iteration;
 
@@ -668,7 +667,7 @@ impl Simulator {
                                             (p.time as i32) < scheduled_at
                                         });
                                         // todo quadratic performance, FIXME
-                                        for assertion in &permanent_assertions {
+                                        for assertion in &new_conflicts {
                                             z3_solver.assert(assertion);
                                         }
 
@@ -691,7 +690,7 @@ impl Simulator {
                                                 .not(),
                                         );
                                         z3_solver.assert(&assertion);
-                                        permanent_assertions.push(assertion);
+                                        new_conflicts.push(assertion);
 
                                         continue 'iteration;
                                     }
@@ -795,7 +794,7 @@ impl Simulator {
             t += 1;
         }
 
-        Some(SimulationResults {
+        Some((SimulationResults {
             train_positions,
             train_to_route,
             station_statistics: self
@@ -810,7 +809,7 @@ impl Simulator {
                     )
                 })
                 .collect(),
-        })
+        }, new_conflicts))
     }
 }
 
@@ -881,6 +880,18 @@ pub fn optimize(
     }
     let mut simulator = Simulator::new(subway_map, routes_vec);
 
+    // use z3 SMT to calculate train position bounds
+    // details: each train is scheduled to depart at an integer time.
+    // the ith train for route r has a variable called r_i
+    // we get train departure times from z3. Any time we observe a conflict, we
+    // add a rule probibiting the cause of the conflict, then jump back in time before the
+    // conflict occurred.
+    let z3_config = z3::Config::new();
+    let z3_context = z3::Context::new(&z3_config);
+    
+    // z3 conflict clauses learned over time
+    let mut conflicts = Vec::new();
+
     loop {
         let mut best_fragment = None;
         let mut lowest_cost = f64::INFINITY;
@@ -924,16 +935,18 @@ pub fn optimize(
             .unwrap()
             .get_mut() += 1;
         let simulation_results =
-            simulator.hyper_hacky_schedule_trains(SCHEDULE_PERIOD as i32, &frequencies);
+            simulator.hyper_hacky_schedule_trains(SCHEDULE_PERIOD as i32, &frequencies, &z3_context, &conflicts);
         simulator.reset();
-
+        
         // TODO should we get an actual cost estimate here?
-        let cost = if simulation_results.is_some() {
-            curr_simulation_results = simulation_results;
+        let cost = if let Some((simulation_results, mut new_conflicts)) = simulation_results {
+            curr_simulation_results = Some(simulation_results);
+            conflicts.append(&mut new_conflicts);
             lowest_cost
         } else {
             f64::INFINITY
         };
+
         if cost < curr_cost {
             curr_cost = cost;
             curr_schedule.get_mut(&best_fragment.1).unwrap()[best_fragment.0] += 1;
