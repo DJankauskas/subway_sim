@@ -1,12 +1,15 @@
 use std::cell::Cell;
-use std::cmp::{max, min};
+use std::cmp::min;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 
 use petgraph::graph::{EdgeIndex, NodeIndex};
-use petgraph::visit::{EdgeRef, IntoEdgesDirected};
+use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use petgraph::Graph;
+use rand::rngs::StdRng;
+use rand::prelude::SliceRandom;
+use rand::SeedableRng;
 use z3::ast::Ast;
 
 use crate::shortest_path::{dijkstra, Terminated};
@@ -435,7 +438,7 @@ impl Simulator {
 
     // This is mostly a copy paste of the run function right now.
     // TODO figure out how to consolidate code with run
-    pub fn hyper_hacky_schedule_trains<'a>(
+    pub fn schedule_trains<'a>(
         &mut self,
         iterations: i32,
         desired_frequencies: &Frequencies,
@@ -444,6 +447,9 @@ impl Simulator {
     ) -> Option<(SimulationResults, Vec<z3::ast::Bool<'a>>)> {
 
         let z3_solver = z3::Solver::new(z3_context);
+        
+        let mut routes: Vec<_> = self.routes.iter().map(|(key, value)| (key.clone(), value.clone())).collect();
+        let mut rng = StdRng::seed_from_u64(5050);
 
         let mut frequencies = Vec::with_capacity(desired_frequencies.len());
         for period in desired_frequencies {
@@ -648,51 +654,8 @@ impl Simulator {
                                         // potentially some of this spaghetti code needs to get factored out into
                                         // a separate function, tbd
                                     }
-                                    Some(conflicting_train) => {
+                                    Some(_) => {
                                         panic!("wait how are we getting here?");
-                                        // MERGE CONFLICT
-
-                                        // TODO choose lesser of times
-                                        let scheduled_at = train_scheduled_at[&curr_train_id];
-                                        t = scheduled_at;
-                                        let num_states_removed =
-                                            states.len() - scheduled_at as usize;
-                                        states.drain(scheduled_at as usize + 1..);
-                                        let prev_state = states.pop().unwrap();
-
-                                        *self = prev_state.0;
-                                        frequencies = prev_state.1;
-
-                                        train_positions.retain(|p: &TrainPositions| {
-                                            (p.time as i32) < scheduled_at
-                                        });
-                                        // todo quadratic performance, FIXME
-                                        for assertion in &new_conflicts {
-                                            z3_solver.assert(assertion);
-                                        }
-
-                                        // restore solver state to the iteration we're returning to
-                                        z3_solver.pop(num_states_removed as u32);
-                                        // encode conflict
-                                        let conflicting_train_scheduled_at = conflicting_train
-                                            .to_z3_departure(&z3_context)
-                                            ._eq(&z3::ast::Int::from_i64(
-                                                &z3_context,
-                                                train_scheduled_at[&conflicting_train] as i64,
-                                            ));
-                                        let assertion = conflicting_train_scheduled_at.implies(
-                                            &curr_train_id
-                                                .to_z3_departure(&z3_context)
-                                                ._eq(&z3::ast::Int::from_i64(
-                                                    &z3_context,
-                                                    scheduled_at as i64,
-                                                ))
-                                                .not(),
-                                        );
-                                        z3_solver.assert(&assertion);
-                                        new_conflicts.push(assertion);
-
-                                        continue 'iteration;
                                     }
                                 };
                             } else {
@@ -704,7 +667,8 @@ impl Simulator {
                 }
             }
 
-            for (id, route) in &self.routes {
+            routes.shuffle(&mut rng);
+            for (id, route) in &routes {
                 let start_station_mut = self.stations.get_mut(&route.start_station).unwrap();
                 // TODO: do I need to handle the case where this is not true?
                 let curr_train_id = TrainId {
@@ -837,7 +801,7 @@ pub type TripData = HashMap<i64, Vec<Trip>>;
 // A map from route ids to scheduled times for the trains to depart
 type Schedule = HashMap<String, Vec<i64>>;
 
-pub const SCHEDULE_GRANULARITY: i64 = 30;
+pub const SCHEDULE_GRANULARITY: i64 = 12;
 pub const SCHEDULE_PERIOD: i64 = 120;
 
 type Frequencies = Vec<HashMap<String, Cell<i64>>>;
@@ -935,7 +899,7 @@ pub fn optimize(
             .unwrap()
             .get_mut() += 1;
         let simulation_results =
-            simulator.hyper_hacky_schedule_trains(SCHEDULE_PERIOD as i32, &frequencies, &z3_context, &conflicts);
+            simulator.schedule_trains(SCHEDULE_PERIOD as i32, &frequencies, &z3_context, &conflicts);
         simulator.reset();
         
         // TODO should we get an actual cost estimate here?
@@ -1297,8 +1261,8 @@ fn search_to_path(
     paths
 }
 
-const WALK_MULTIPLIER: f64 = 1.0;
-const WAIT_MULTIPLIER: f64 = 1.0;
+const WALK_MULTIPLIER: f64 = 2.5;
+const WAIT_MULTIPLIER: f64 = 2.1;
 
 fn calculate_time_to(search_map: &SearchMap, mut node: NodeIndex) -> f64 {
     let mut time = 0.;

@@ -20,7 +20,7 @@ use rand::rngs::StdRng;
 use rand::seq::IteratorRandom;
 use rand::{Rng, SeedableRng};
 
-use crate::simulator::{SearchMap, Trip, TripData, SCHEDULE_GRANULARITY};
+use crate::simulator::{SearchMap, Trip, TripData};
 
 #[derive(Deserialize, Serialize, Clone, Hash, PartialEq, Eq)]
 struct JsNode {
@@ -278,7 +278,7 @@ async fn run_optimize(
         let start = subway_map.node_indices().choose(&mut rng).unwrap();
         let end = subway_map.node_indices().choose(&mut rng).unwrap();
         
-        let paths = shortest_paths(start, end, &mut search_map, 3);
+        let paths = shortest_paths(start, end, &mut search_map, 2);
         
         if !paths.is_empty() {
             let trip = Trip { start,
@@ -286,7 +286,7 @@ async fn run_optimize(
                 count: 1,
             };
             trip_data
-                .entry(rng.gen_range(SCHEDULE_GRANULARITY*2..SCHEDULE_PERIOD))
+                .entry(rng.gen_range(0..SCHEDULE_PERIOD))
                 .or_default()
                 .push(trip);
             num_trips += 1;
@@ -299,7 +299,7 @@ async fn run_optimize(
 
     let (schedule, simulation_results) = optimize(subway_map, routes, &trip_data, &shortest_paths_cache);
 
-    println!("Found schedule: {:#?}", schedule);
+    println!("Found schedule: {:#?}\x07", schedule);
 
     // TODO handle error condition
     let simulation_results = simulation_results.unwrap();
